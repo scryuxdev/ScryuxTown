@@ -1,0 +1,3631 @@
+--!strict
+-- ============================================================
+-- ScryuxTown
+-- ============================================================
+
+local _env = getgenv and getgenv() or _G
+local realPrint = print
+local realWarn  = warn
+local function _noop() end
+_env.print = _noop
+_env.warn  = _noop
+
+local function Has(fn: string): boolean
+    local env = getgenv and getgenv() or _G
+    return type(env[fn]) == "function" or type(_G[fn]) == "function"
+end
+
+local function SilentPcall(fn, ...)
+    if not fn then return nil end
+    local ok, result = pcall(fn, ...)
+    if not ok then return nil end
+    return result
+end
+
+-- ============================================================
+-- 2. Load Scryux UI
+-- ============================================================
+if _env.TownComplete_Loaded then
+    pcall(function() _env.TownComplete_Cleanup() end)
+    _env.TownComplete_Loaded = false
+    task.wait(0.3)
+end
+_env.TownComplete_Loaded = true
+
+local SCRYUX_URLS = {
+    "https://cdn.jsdelivr.net/gh/player2dwhite-tech/Scryux-Library@main/Scryux-Library.lua",
+    "https://raw.githubusercontent.com/player2dwhite-tech/Scryux-Library/main/Scryux-Library.lua",
+}
+local CACHE_FILE = "scryux_ui_cache.lua"
+
+local function SafeRequest(url: string): string?
+    if Has("request") then
+        local ok, response = pcall(function()
+            return request({
+                Url = url, Method = "GET",
+                Headers = { ["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+            })
+        end)
+        if ok and response and response.Success then return response.Body end
+    end
+    local ok, result = pcall(function() return game:HttpGet(url) end)
+    return ok and result or nil
+end
+
+local function IsValidUI(code: string): boolean
+    if not code or #code < 2000 then return false end
+    if not code:find("CreateWindow") then return false end
+    if not code:find("CreateTab") then return false end
+    return true
+end
+
+local function LoadFromCache()
+    if type(isfile) ~= "function" or type(readfile) ~= "function" then return nil end
+    local ok, exists = pcall(isfile, CACHE_FILE)
+    if not ok or not exists then return nil end
+    local ok2, cached = pcall(readfile, CACHE_FILE)
+    if not ok2 or not cached or #cached < 2000 then return nil end
+    if not IsValidUI(cached) then
+        if type(delfile) == "function" then pcall(delfile, CACHE_FILE) end
+        return nil
+    end
+    local fn = loadstring(cached)
+    if not fn then return nil end
+    local ok3, lib = pcall(fn)
+    if ok3 and lib then return lib end
+    return nil
+end
+
+local function LoadFromURL(url: string)
+    local code = SafeRequest(url)
+    if not code or #code < 2000 then return nil end
+    if not IsValidUI(code) then return nil end
+    local fn = loadstring(code)
+    if not fn then return nil end
+    local ok, lib = pcall(fn)
+    if ok and lib then
+        if type(writefile) == "function" then
+            pcall(writefile, CACHE_FILE, code)
+        end
+        return lib
+    end
+    return nil
+end
+
+local ScryuxUI = LoadFromCache()
+if not ScryuxUI then
+    for _, url in ipairs(SCRYUX_URLS) do
+        local lib = LoadFromURL(url)
+        if lib then ScryuxUI = lib; break end
+        task.wait(0.5)
+    end
+end
+
+if not ScryuxUI then
+    _env.print = realPrint
+    _env.warn  = realWarn
+    warn("[TownComplete] No se pudo cargar Scryux UI")
+    return
+end
+
+-- ============================================================
+-- 3. Services
+-- ============================================================
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui          = game:GetService("CoreGui")
+local Stats            = game:GetService("Stats")
+local Lighting         = game:GetService("Lighting")
+
+local LP = Players.LocalPlayer
+local Workspace = workspace
+local function GetCamera() return Workspace.CurrentCamera end
+
+local function IsMenuOpen()
+    local w = _env.TownUI_Window
+    if w and w.IsVisible then
+        local ok, visible = pcall(function() return w:IsVisible() end)
+        if ok then return visible end
+    end
+    return false
+end
+
+local Vector2_new, Vector3_new, CFrame_new = Vector2.new, Vector3.new, CFrame.new
+local math_floor, math_clamp, math_max = math.floor, math.clamp, math.max
+local math_rad, math_tan = math.rad, math.tan
+local table_insert, table_remove = table.insert, table.remove
+local pairs, ipairs, os_clock = pairs, ipairs, os.clock
+local string_find = string.find
+
+-- ============================================================
+-- 4. VARIABLES GLOBALES
+-- ============================================================
+local isScriptUnloaded = false
+local activePlayers = {}
+local uniqueId = tostring(math.random(100000, 999999))
+
+local aimKeyHeld = false
+local isLocalDead = false
+local aimbotHelperActive = false
+
+local noRecoilRunning = false
+local noRecoilConnections = {}
+local noSpreadRunning, noSpreadThread = false, nil
+local noSwayRunning, noSwayThread = false, nil
+
+local xrayActive, xrayThread = false, nil
+local originalFogEnd = Lighting.FogEnd
+local originalTransparency = {}
+
+local visibilityCache = {}
+local VIS_CACHE_TTL = 0.15
+
+local SharedRayParams = RaycastParams.new()
+SharedRayParams.FilterType = Enum.RaycastFilterType.Blacklist
+local SharedIgnoreList = {}
+
+local anti360Active = false
+local anti360Cooldown = 0
+local currentTargetForAnti360 = nil
+local helperMousePosition = Vector2_new(0, 0)
+
+local highlightCooldowns = {}
+
+local antiFallRunning = false
+local antiFallConnection = nil
+local antiFallCharConnections = {}
+
+local weaponEditorCache = {}
+local weaponOriginalValues = {}
+local weaponEditorDynamicDropdown = nil
+local weaponEditorCountLabel = nil
+
+local SkeletonLinePool = {}
+local SkeletonLinePoolMAX = 500
+local ActiveSkeletons = {}
+local ESPPool = {}
+local ESPObjectPool = { box = {}, health = {}, name = {}, chams = {} }
+local ESPObjectPoolMAX = 32
+
+local targetIndicator = nil
+local Bar = nil
+
+local strafeConnection = nil
+local strafeOriginalWalkspeed = nil
+local strafeKeyLeftHeld = false
+local strafeKeyRightHeld = false
+
+local spinbotConnection = nil
+local spinbotAngle = 0
+
+local hideBodyConnection = nil
+
+-- Bullet Tracers
+local TracerPool = {}
+local TracerPoolMAX = 64
+local ActiveTracers = {}
+local tracerConnections = {}
+
+-- Sticky Target Lock
+local stickyTarget = nil
+local stickyLastSeen = 0
+
+-- Aim Assist
+local aimAssistActive = false
+local aimAssistConnection = nil
+local aimAssistFOVCircle = nil
+local aimAssistFOVConn = nil
+local aimAssistLastFrame = 0
+
+-- ============================================================
+-- 5. Settings
+-- ============================================================
+local Settings = {
+    ESP = {
+        Enabled = false,
+        Chams = false, TeamCheck = false,
+        ShowHealth = false, ShowName = false, ShowDistance = false,
+        Box = false, BoxColor = Color3.fromRGB(170, 0, 255),
+        BoxThickness = 1, BoxPadding = 0.5,
+        HealthThickness = 2,
+        NameColor = Color3.fromRGB(255, 255, 0),
+        ChamsColor = Color3.fromRGB(170, 0, 255),
+        ChamsFillTransparency = 0.25,
+        ChamsOutlineTransparency = 0,
+        ChamsOutlineColor = Color3.new(1, 1, 1),
+        ChamsMaterial = "ForceField",
+        ChamsDepthMode = "AlwaysOnTop",
+        WallcheckChams = false,
+        Colors = {
+            Visible = Color3.fromRGB(255, 0, 0),
+            Partial = Color3.fromRGB(255, 200, 0),
+            Invisible = Color3.fromRGB(0, 255, 80),
+            Passive = Color3.fromRGB(0, 120, 255),
+            Dead = Color3.fromRGB(100, 100, 100),
+        }
+    },
+    Skeleton = {
+        Enabled = false,
+        Color = Color3.fromRGB(255, 255, 255),
+        Thickness = 1,
+        MaxDistance = 500,
+        RigMode = "Auto",
+        OnlyVisible = false,
+    },
+    FullBright = { Enabled = false },
+    Aimbot = {
+        Enabled = false, Method = "Camera",
+        WallCheck = false, StrictWallCheck = false,
+        IgnoreTransparent = true, IgnoreNonCollidable = true,
+        TeamCheck = false, IgnorePassive = true,
+        MaxDistance = 500, AimKeyType = "Mouse",
+        AimKey = Enum.KeyCode.T,
+        AimMouseButton = Enum.UserInputType.MouseButton2,
+        FOV = 180, ShowFOV = false,
+        FOVColor = Color3.fromRGB(255,255,255), FOVThickness = 2,
+        AimPartMode = "Auto (Nearest to Crosshair)",
+        HelperSmoothness = 0.15,
+        BaseSmoothness = 0.15,
+        UsePrediction = false, PredictionAmount = 0.13,
+        Priority = "Distance",
+        StickyLock = false,
+        StickyTimeout = 2,
+        Anti360 = { Enabled = false, DetectionDistance = 1.5, Hysteresis = 1.5, ReEnableDelay = 0.25 }
+    },
+    AimAssist = {
+        Enabled = false,
+        FOV = 30,
+        ShowFOV = false,
+        FOVColor = Color3.fromRGB(0, 255, 255),
+        FOVThickness = 1,
+        MaxDistance = 500,
+        Smoothness = 0.3,
+        AimPart = "Head",
+        TeamCheck = false,
+        IgnorePassive = true,
+        WallCheck = false,
+        Visible = true,
+        UseMouse = false,
+        Priority = "Distance",
+        UsePrediction = false,
+        PredictionAmount = 0.13,
+    },
+    WeaponMods = { NoRecoil = false, NoSpread = false, NoSway = false },
+    Visuals = {
+        XRay = false, NoFog = false, NoBloom = false, NoSunRays = false,
+        CustomFOV = false, FOVValue = 70, OriginalFOV = nil,
+        HideBody = false, HideHands = false, HideTool = false,
+        BulletTracers = false,
+        TracerColor = Color3.fromRGB(255, 50, 50),
+        TracerLifetime = 2,
+        TracerThickness = 2,
+        TracerMaxDistance = 500,
+    },
+    Sync = {
+        Enabled = false,
+        TryFFlagFallback = false,
+        AutoDisableOnLowFPS = false,
+    },
+    HUD = {
+        Enabled = true,
+        ShowFPS = true,
+        ShowPing = true,
+        Position = "TopRight",
+    },
+    Performance = {
+        ESPUpdateRate = 0.03,
+        SkeletonUpdateRate = 0.05,
+    },
+    UI = { ShowScreenBar = true },
+    AntiFall = { Enabled = false },
+    Movement = {
+        StrafeEnabled = false,
+        StrafeDistance = 0.3,
+        PeekCooldown = 0.08,
+        StrafeKeyLeft = Enum.KeyCode.A,
+        StrafeKeyRight = Enum.KeyCode.D,
+        Spinbot = false,
+        SpinbotSpeed = 360,
+    },
+    WeaponEditor = {
+        SelectedWeapon = "",
+        SelectedParam = "Damage",
+        CustomValue = 100,
+    }
+}
+
+-- ============================================================
+-- 6. BONES R6 / R15
+-- ============================================================
+local R15_BONES = {
+    {"UpperTorso", "Head"},
+    {"UpperTorso", "LeftUpperArm"},
+    {"LeftUpperArm", "LeftLowerArm"},
+    {"LeftLowerArm", "LeftHand"},
+    {"UpperTorso", "RightUpperArm"},
+    {"RightUpperArm", "RightLowerArm"},
+    {"RightLowerArm", "RightHand"},
+    {"UpperTorso", "LowerTorso"},
+    {"LowerTorso", "LeftUpperLeg"},
+    {"LeftUpperLeg", "LeftLowerLeg"},
+    {"LeftLowerLeg", "LeftFoot"},
+    {"LowerTorso", "RightUpperLeg"},
+    {"RightUpperLeg", "RightLowerLeg"},
+    {"RightLowerLeg", "RightFoot"},
+}
+
+local R6_BONES = {
+    {"Torso", "Head"},
+    {"Torso", "Left Arm"},
+    {"Torso", "Right Arm"},
+    {"Torso", "Left Leg"},
+    {"Torso", "Right Leg"},
+}
+
+local function GetRigType(char)
+    if not char then return nil end
+    if char:FindFirstChild("UpperTorso") and char:FindFirstChild("LowerTorso") then
+        return "R15"
+    end
+    if char:FindFirstChild("Torso") and char:FindFirstChild("Left Arm") then
+        return "R6"
+    end
+    if char:FindFirstChild("Head") and char:FindFirstChild("HumanoidRootPart") then
+        return "R6"
+    end
+    return nil
+end
+
+local function GetBonesForRig(rigType)
+    if rigType == "R15" then return R15_BONES end
+    if rigType == "R6" then return R6_BONES end
+    return nil
+end
+
+-- ============================================================
+-- 6.5. BODY PARTS
+-- ============================================================
+local BODY_PARTS = {
+    "Head", "UpperTorso", "LowerTorso", "Torso", "HumanoidRootPart",
+    "LeftUpperArm", "LeftLowerArm", "LeftHand",
+    "RightUpperArm", "RightLowerArm", "RightHand",
+    "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+    "RightUpperLeg", "RightLowerLeg", "RightFoot",
+}
+
+local BODY_PARTS_R6 = {
+    "Head", "Torso", "HumanoidRootPart",
+    "Left Arm", "Right Arm", "Left Leg", "Right Leg",
+}
+
+local BODY_PARTS_ALL = {
+    "Auto (Nearest to Crosshair)",
+    "Head",
+    "UpperTorso", "LowerTorso", "Torso", "HumanoidRootPart",
+    "LeftUpperArm", "LeftLowerArm", "LeftHand",
+    "RightUpperArm", "RightLowerArm", "RightHand",
+    "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+    "RightUpperLeg", "RightLowerLeg", "RightFoot",
+    "Left Arm", "Right Arm", "Left Leg", "Right Leg",
+}
+
+-- ============================================================
+-- 7. DRAWING POOLS (Skeleton Lines)
+-- ============================================================
+local function AcquireSkeletonLine()
+    local line = table_remove(SkeletonLinePool)
+    if line then
+        line.Visible = false
+        return line
+    end
+    line = Drawing.new("Line")
+    line.Thickness = 1
+    line.Visible = false
+    return line
+end
+
+local function ReleaseSkeletonLine(line)
+    if not line then return end
+    line.Visible = false
+    if #SkeletonLinePool < SkeletonLinePoolMAX then
+        table_insert(SkeletonLinePool, line)
+    else
+        pcall(function() line:Remove() end)
+    end
+end
+
+local function ClearSkeletonForPlayer(playerName)
+    local data = ActiveSkeletons[playerName]
+    if not data then return end
+    for _, line in ipairs(data.lines) do
+        ReleaseSkeletonLine(line)
+    end
+    ActiveSkeletons[playerName] = nil
+end
+
+local function ClearAllSkeletons()
+    for name in pairs(ActiveSkeletons) do
+        ClearSkeletonForPlayer(name)
+    end
+end
+
+-- ============================================================
+-- 8. ESP DRAWING POOLS
+-- ============================================================
+local function GetOrCreateESP(playerName)
+    local esp = ESPPool[playerName]
+    if esp then return esp end
+
+    local box = table_remove(ESPObjectPool.box)
+    if not box then
+        box = Drawing.new("Square")
+        box.Thickness = 1
+        box.Filled = false
+        box.Visible = false
+    end
+
+    local health = table_remove(ESPObjectPool.health)
+    if not health then
+        health = Drawing.new("Line")
+        health.Thickness = 2
+        health.Visible = false
+    end
+
+    local name = table_remove(ESPObjectPool.name)
+    if not name then
+        name = Drawing.new("Text")
+        name.Size = 16
+        name.Center = true
+        name.Outline = true
+        name.Font = 2
+        name.Visible = false
+    end
+
+    local chams = table_remove(ESPObjectPool.chams)
+    if not chams then
+        chams = Instance.new("Highlight")
+        chams.FillColor = Settings.ESP.ChamsColor
+        chams.OutlineColor = Settings.ESP.ChamsOutlineColor
+        chams.FillTransparency = Settings.ESP.ChamsFillTransparency
+        chams.OutlineTransparency = Settings.ESP.ChamsOutlineTransparency
+        chams.DepthMode = Enum.HighlightDepthMode[Settings.ESP.ChamsDepthMode] or Enum.HighlightDepthMode.AlwaysOnTop
+        chams.Enabled = false
+        chams.Parent = CoreGui
+    else
+        chams.Parent = CoreGui
+    end
+
+    esp = {
+        box = box,
+        health = health,
+        name = name,
+        chams = chams,
+    }
+
+    ESPPool[playerName] = esp
+    return esp
+end
+
+local function RemoveESPForPlayer(playerName)
+    local esp = ESPPool[playerName]
+    if not esp then return end
+
+    if #ESPObjectPool.box < ESPObjectPoolMAX then
+        esp.box.Visible = false
+        table_insert(ESPObjectPool.box, esp.box)
+    else
+        pcall(function() esp.box:Remove() end)
+    end
+
+    if #ESPObjectPool.health < ESPObjectPoolMAX then
+        esp.health.Visible = false
+        table_insert(ESPObjectPool.health, esp.health)
+    else
+        pcall(function() esp.health:Remove() end)
+    end
+
+    if #ESPObjectPool.name < ESPObjectPoolMAX then
+        esp.name.Visible = false
+        table_insert(ESPObjectPool.name, esp.name)
+    else
+        pcall(function() esp.name:Remove() end)
+    end
+
+    if #ESPObjectPool.chams < ESPObjectPoolMAX then
+        esp.chams.Enabled = false
+        esp.chams.Adornee = nil
+        esp.chams.Parent = nil
+        table_insert(ESPObjectPool.chams, esp.chams)
+    else
+        pcall(function() esp.chams:Destroy() end)
+    end
+
+    ESPPool[playerName] = nil
+end
+
+local function ClearAllESP()
+    for name in pairs(ESPPool) do
+        RemoveESPForPlayer(name)
+    end
+    for _, obj in ipairs(ESPObjectPool.box) do pcall(function() obj:Remove() end) end
+    for _, obj in ipairs(ESPObjectPool.health) do pcall(function() obj:Remove() end) end
+    for _, obj in ipairs(ESPObjectPool.name) do pcall(function() obj:Remove() end) end
+    for _, obj in ipairs(ESPObjectPool.chams) do pcall(function() obj:Destroy() end) end
+    ESPObjectPool = { box = {}, health = {}, name = {}, chams = {} }
+end
+
+-- ============================================================
+-- 9. BOUNDING BOX
+-- ============================================================
+local function GetBoundingVectors(char)
+    if not char then return nil, nil, false end
+    local ok, cf, size = pcall(function()
+        local c, s = char:GetBoundingBox()
+        return c, s
+    end)
+    if not ok or not cf or not size then return nil, nil, false end
+
+    local padding = Settings.ESP.BoxPadding
+    size = size + Vector3_new(padding, padding, padding)
+
+    local corners = {
+        cf * CFrame.new(-size.X/2,  size.Y/2,  size.Z/2),
+        cf * CFrame.new( size.X/2,  size.Y/2,  size.Z/2),
+        cf * CFrame.new(-size.X/2, -size.Y/2,  size.Z/2),
+        cf * CFrame.new( size.X/2, -size.Y/2,  size.Z/2),
+        cf * CFrame.new(-size.X/2,  size.Y/2, -size.Z/2),
+        cf * CFrame.new( size.X/2,  size.Y/2, -size.Z/2),
+        cf * CFrame.new(-size.X/2, -size.Y/2, -size.Z/2),
+        cf * CFrame.new( size.X/2, -size.Y/2, -size.Z/2),
+    }
+
+    local minX, minY = math.huge, math.huge
+    local maxX, maxY = -math.huge, -math.huge
+    local anyOnScreen = false
+    local cam = GetCamera()
+
+    for _, corner in ipairs(corners) do
+        local sp, onScreen = cam:WorldToViewportPoint(corner.Position)
+        if onScreen then
+            anyOnScreen = true
+            if sp.X < minX then minX = sp.X end
+            if sp.Y < minY then minY = sp.Y end
+            if sp.X > maxX then maxX = sp.X end
+            if sp.Y > maxY then maxY = sp.Y end
+        end
+    end
+
+    if not anyOnScreen then return nil, nil, false end
+
+    local boxPos = Vector2_new(minX, minY)
+    local boxSize = Vector2_new(maxX - minX, maxY - minY)
+
+    if boxSize.X > 5000 or boxSize.Y > 5000 or boxSize.X < 1 or boxSize.Y < 1 then
+        return nil, nil, false
+    end
+
+    return boxPos, boxSize, true
+end
+
+-- ============================================================
+-- 10. PASSIVE
+-- ============================================================
+local function IsPassive(playerName)
+    local char = Workspace:FindFirstChild(playerName)
+    if not char then return false end
+    local head = char:FindFirstChild("Head")
+    if head then
+        if head.Material == Enum.Material.ForceField then return true end
+        if head:FindFirstChildOfClass("ForceField") then return true end
+    end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum and hum:FindFirstChildOfClass("ForceField") then return true end
+    local torso = char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+    if torso and torso.Material == Enum.Material.ForceField then return true end
+    return false
+end
+
+-- ============================================================
+-- 11. VISIBILITY
+-- ============================================================
+local function IsPartTransparent(part)
+    if part.Transparency >= 0.1 then return true end
+    if part.CanCollide == false then return true end
+    if part.Material == Enum.Material.Glass then return true end
+    if part.Material == Enum.Material.ForceField then return true end
+    local n = part.Name:lower()
+    if string_find(n, "glass") or string_find(n, "window") then return true end
+    if part:IsA("SpawnLocation") then return true end
+    if part.Parent and part.Parent:IsA("Tool") then return true end
+    if part:IsA("MeshPart") and part.Transparency >= 0.3 then return true end
+    if part:IsA("Seat") then return true end
+    return false
+end
+
+local function CheckPositionVisibility(position, player, ignoreTransparent, ignoreNonCollidable)
+    local cam = GetCamera()
+    local camPos = cam.CFrame.Position
+    local dir = (position - camPos).Unit
+    local dist = (position - camPos).Magnitude
+    local params = SharedRayParams
+    if #SharedIgnoreList == 0 then
+        local ignore = {}
+        if LP.Character then
+            for _, p in ipairs(LP.Character:GetDescendants()) do
+                if p:IsA("BasePart") then table_insert(ignore, p) end
+            end
+        end
+        if player and player.Character then
+            for _, p in ipairs(player.Character:GetDescendants()) do
+                if p:IsA("BasePart") then table_insert(ignore, p) end
+            end
+        end
+        if cam then table_insert(ignore, cam) end
+        SharedIgnoreList = ignore
+        SharedRayParams.FilterDescendantsInstances = ignore
+    end
+    local hits = {}
+    local origin = camPos
+    local remaining = dist
+    while remaining > 0.01 and #hits < 50 do
+        local hit = Workspace:Raycast(origin, dir * remaining, params)
+        if not hit then break end
+        local hp = hit.Instance
+        if player and player.Character and hp:IsDescendantOf(player.Character) then break end
+        if hp.Parent and hp.Parent:IsA("Tool") then
+            local nd = (hit.Position - origin).Magnitude
+            origin = hit.Position + dir * 0.01
+            remaining = remaining - nd - 0.01
+            continue
+        end
+        if (ignoreTransparent and IsPartTransparent(hp)) or (ignoreNonCollidable and not hp.CanCollide) then
+            local nd = (hit.Position - origin).Magnitude
+            origin = hit.Position + dir * 0.01
+            remaining = remaining - nd - 0.01
+        else
+            table_insert(hits, hp)
+            local nd = (hit.Position - origin).Magnitude
+            origin = hit.Position + dir * 0.01
+            remaining = remaining - nd - 0.01
+        end
+    end
+    if #hits == 0 then return "visible" end
+    for _, p in ipairs(hits) do
+        if not IsPartTransparent(p) and p.CanCollide then return "hidden" end
+    end
+    return "partially_visible"
+end
+
+local function CheckVisibility(player)
+    if not player or not player.Character then return "hidden" end
+    local head = player.Character:FindFirstChild("Head")
+    if not head then return "hidden" end
+
+    local cached = visibilityCache[player.Name]
+    local now = os_clock()
+    if cached and (now - cached.time) < VIS_CACHE_TTL then
+        return cached.vis
+    end
+
+    local vis = CheckPositionVisibility(head.Position, player,
+        Settings.Aimbot.IgnoreTransparent, Settings.Aimbot.IgnoreNonCollidable)
+
+    visibilityCache[player.Name] = { vis = vis, time = now }
+    return vis
+end
+
+-- ============================================================
+-- 12. ESP 
+-- ============================================================
+local function GetESPColor(player)
+    if IsPassive(player.Name) then return Settings.ESP.Colors.Passive end
+    local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+    if hum and hum.Health <= 0 then return Settings.ESP.Colors.Dead end
+    return Settings.ESP.Colors.Visible
+end
+
+local function UpdateESPForPlayer(player)
+    if not player or player == LP then return end
+
+    if not player.Character then
+        local esp = ESPPool[player.Name]
+        if esp then
+            esp.box.Visible = false
+            esp.health.Visible = false
+            esp.name.Visible = false
+            esp.chams.Enabled = false
+        end
+        ClearSkeletonForPlayer(player.Name)
+        return
+    end
+
+    local char = player.Character
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then
+        local esp = ESPPool[player.Name]
+        if esp then
+            esp.box.Visible = false
+            esp.health.Visible = false
+            esp.name.Visible = false
+            esp.chams.Enabled = false
+        end
+        ClearSkeletonForPlayer(player.Name)
+        return
+    end
+
+    local esp = GetOrCreateESP(player.Name)
+    local boxPos, boxSize, isVisible = GetBoundingVectors(char)
+    local espColor = GetESPColor(player)
+
+    if Settings.ESP.Chams and Settings.ESP.Enabled then
+        esp.chams.Adornee = char
+        esp.chams.FillColor = espColor
+        esp.chams.OutlineColor = Settings.ESP.ChamsOutlineColor
+        esp.chams.OutlineTransparency = Settings.ESP.ChamsOutlineTransparency
+        esp.chams.DepthMode = Enum.HighlightDepthMode[Settings.ESP.ChamsDepthMode] or Enum.HighlightDepthMode.AlwaysOnTop
+
+        if Settings.ESP.WallcheckChams then
+            local vis = CheckVisibility(player)
+            if vis == "hidden" then
+                esp.chams.FillTransparency = 1
+            else
+                esp.chams.FillTransparency = Settings.ESP.ChamsFillTransparency
+            end
+        else
+            esp.chams.FillTransparency = Settings.ESP.ChamsFillTransparency
+        end
+        esp.chams.Enabled = true
+    else
+        esp.chams.Enabled = false
+    end
+
+    if not isVisible or not boxPos or not boxSize then
+        esp.box.Visible = false
+        esp.health.Visible = false
+        esp.name.Visible = false
+        ClearSkeletonForPlayer(player.Name)
+        return
+    end
+
+    if Settings.ESP.Box and Settings.ESP.Enabled then
+        esp.box.Visible = true
+        esp.box.Position = boxPos
+        esp.box.Size = boxSize
+        esp.box.Color = Settings.ESP.BoxColor
+        esp.box.Thickness = Settings.ESP.BoxThickness
+    else
+        esp.box.Visible = false
+    end
+
+    if Settings.ESP.ShowHealth and Settings.ESP.Enabled then
+        esp.health.Visible = true
+        local hp = math_clamp(hum.Health / math_max(hum.MaxHealth, 1), 0, 1)
+        esp.health.From = Vector2_new(boxPos.X - 5, boxPos.Y + boxSize.Y)
+        esp.health.To = Vector2_new(boxPos.X - 5, boxPos.Y + boxSize.Y - (boxSize.Y * hp))
+        esp.health.Color = Color3.fromHSV(hp * 0.3, 1, 1)
+        esp.health.Thickness = Settings.ESP.HealthThickness
+    else
+        esp.health.Visible = false
+    end
+
+    if Settings.ESP.ShowName and Settings.ESP.Enabled then
+        esp.name.Visible = true
+        local text = player.Name
+        if Settings.ESP.ShowDistance and LP.Character then
+            local myRoot = LP.Character:FindFirstChild("HumanoidRootPart")
+            local theirRoot = char:FindFirstChild("HumanoidRootPart")
+            if myRoot and theirRoot then
+                local d = (myRoot.Position - theirRoot.Position).Magnitude
+                text = text .. " [" .. math_floor(d) .. "m]"
+            end
+        end
+        esp.name.Text = text
+        esp.name.Position = Vector2_new(boxPos.X + boxSize.X/2, boxPos.Y - 20)
+        esp.name.Color = Settings.ESP.NameColor
+    else
+        esp.name.Visible = false
+    end
+end
+
+-- ============================================================
+-- 13. SKELETON 
+-- ============================================================
+local function UpdateSkeletonForPlayer(player)
+    if not player or player == LP then return end
+    if not Settings.Skeleton.Enabled then
+        ClearSkeletonForPlayer(player.Name)
+        return
+    end
+    if not player.Character then
+        ClearSkeletonForPlayer(player.Name)
+        return
+    end
+
+    local char = player.Character
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then
+        ClearSkeletonForPlayer(player.Name)
+        return
+    end
+
+    if Settings.Skeleton.OnlyVisible then
+        local vis = CheckVisibility(player)
+        if vis == "hidden" then
+            ClearSkeletonForPlayer(player.Name)
+            return
+        end
+    end
+
+    if Settings.Skeleton.MaxDistance > 0 and LP.Character then
+        local myRoot = LP.Character:FindFirstChild("HumanoidRootPart")
+        local theirRoot = char:FindFirstChild("HumanoidRootPart")
+        if myRoot and theirRoot then
+            local d = (myRoot.Position - theirRoot.Position).Magnitude
+            if d > Settings.Skeleton.MaxDistance then
+                ClearSkeletonForPlayer(player.Name)
+                return
+            end
+        end
+    end
+
+    local rigType = GetRigType(char)
+    if not rigType then
+        ClearSkeletonForPlayer(player.Name)
+        return
+    end
+
+    local mode = Settings.Skeleton.RigMode
+    if mode == "R6" and rigType ~= "R6" then
+        ClearSkeletonForPlayer(player.Name)
+        return
+    end
+    if mode == "R15" and rigType ~= "R15" then
+        ClearSkeletonForPlayer(player.Name)
+        return
+    end
+
+    local bones = GetBonesForRig(rigType)
+    if not bones then
+        ClearSkeletonForPlayer(player.Name)
+        return
+    end
+
+    local data = ActiveSkeletons[player.Name]
+    if not data then
+        data = { lines = {}, rigType = rigType }
+        ActiveSkeletons[player.Name] = data
+    end
+
+    if data.rigType ~= rigType then
+        ClearSkeletonForPlayer(player.Name)
+        data = { lines = {}, rigType = rigType }
+        ActiveSkeletons[player.Name] = data
+    end
+
+    local cam = GetCamera()
+    for i, boneMap in ipairs(bones) do
+        if not data.lines[i] then
+            data.lines[i] = AcquireSkeletonLine()
+        end
+        local line = data.lines[i]
+        local partA = char:FindFirstChild(boneMap[1])
+        local partB = char:FindFirstChild(boneMap[2])
+
+        if partA and partB then
+            local vA, oA = cam:WorldToViewportPoint(partA.Position)
+            local vB, oB = cam:WorldToViewportPoint(partB.Position)
+            if oA and oB then
+                line.From = Vector2_new(vA.X, vA.Y)
+                line.To = Vector2_new(vB.X, vB.Y)
+                line.Color = Settings.Skeleton.Color
+                line.Thickness = Settings.Skeleton.Thickness
+                line.Visible = true
+            else
+                line.Visible = false
+            end
+        else
+            line.Visible = false
+        end
+    end
+
+    for i = #bones + 1, #data.lines do
+        data.lines[i].Visible = false
+    end
+end
+
+-- ============================================================
+-- 14. MAIN LOOPS
+-- ============================================================
+local function RebuildActivePlayers()
+    activePlayers = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then
+            table_insert(activePlayers, p)
+        end
+    end
+end
+
+local lastESPUpdate = 0
+local lastSkeletonUpdate = 0
+
+local espConn = RunService.RenderStepped:Connect(function()
+    if isScriptUnloaded then return end
+    local now = os_clock()
+    if (now - lastESPUpdate) < Settings.Performance.ESPUpdateRate then return end
+    lastESPUpdate = now
+    for _, player in ipairs(activePlayers) do
+        SilentPcall(UpdateESPForPlayer, player)
+    end
+end)
+
+local skeletonConn = RunService.RenderStepped:Connect(function()
+    if isScriptUnloaded then return end
+    local now = os_clock()
+    if (now - lastSkeletonUpdate) < Settings.Performance.SkeletonUpdateRate then return end
+    lastSkeletonUpdate = now
+    for _, player in ipairs(activePlayers) do
+        SilentPcall(UpdateSkeletonForPlayer, player)
+    end
+end)
+
+RebuildActivePlayers()
+
+-- ============================================================
+-- 15. HUD (FPS / PING)
+-- ============================================================
+local HudLabel = Drawing.new("Text")
+HudLabel.Visible = false
+HudLabel.Size = 18
+HudLabel.Outline = true
+HudLabel.Color = Color3.fromRGB(0, 255, 0)
+HudLabel.Font = 2
+
+local cachedFPS = 60
+local cachedPing = 0
+local frameCount = 0
+local lastFPSReset = os_clock()
+
+local function GetPing()
+    local ok, ping = pcall(function()
+        return Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+    end)
+    if ok and ping then return math_floor(ping) end
+    return 0
+end
+
+local fpsCounterConn = RunService.RenderStepped:Connect(function()
+    if isScriptUnloaded then return end
+    frameCount = frameCount + 1
+    local now = os_clock()
+    if (now - lastFPSReset) >= 1 then
+        cachedFPS = frameCount
+        frameCount = 0
+        lastFPSReset = now
+    end
+end)
+
+local pingUpdateConn = RunService.Heartbeat:Connect(function()
+    if isScriptUnloaded then return end
+    pcall(function()
+        cachedPing = GetPing()
+    end)
+end)
+
+local hudConn = RunService.RenderStepped:Connect(function()
+    if isScriptUnloaded then return end
+    if not Settings.HUD.Enabled then
+        HudLabel.Visible = false
+        return
+    end
+    HudLabel.Visible = true
+    local cam = GetCamera()
+    local text = ""
+    if Settings.HUD.ShowFPS then text = "FPS: " .. cachedFPS end
+    if Settings.HUD.ShowPing then
+        if text ~= "" then text = text .. "\n" end
+        text = text .. "PING: " .. cachedPing .. "ms"
+    end
+    HudLabel.Text = text
+    if cachedFPS >= 60 then
+        HudLabel.Color = Color3.fromRGB(0, 255, 0)
+    elseif cachedFPS >= 30 then
+        HudLabel.Color = Color3.fromRGB(255, 255, 0)
+    else
+        HudLabel.Color = Color3.fromRGB(255, 0, 0)
+    end
+
+    local pos = Settings.HUD.Position
+    if pos == "TopRight" then
+        HudLabel.Position = Vector2_new(cam.ViewportSize.X - 120, 20)
+    elseif pos == "TopLeft" then
+        HudLabel.Position = Vector2_new(20, 20)
+    elseif pos == "BottomRight" then
+        HudLabel.Position = Vector2_new(cam.ViewportSize.X - 120, cam.ViewportSize.Y - 80)
+    elseif pos == "BottomLeft" then
+        HudLabel.Position = Vector2_new(20, cam.ViewportSize.Y - 80)
+    end
+end)
+
+-- ============================================================
+-- 16. Events of Players
+-- ============================================================
+local playerAddedConn = Players.PlayerAdded:Connect(function(p)
+    if p ~= LP then
+        RebuildActivePlayers()
+    end
+end)
+
+local playerRemovingConn = Players.PlayerRemoving:Connect(function(p)
+    RemoveESPForPlayer(p.Name)
+    ClearSkeletonForPlayer(p.Name)
+    visibilityCache[p.Name] = nil
+    highlightCooldowns[p.Name] = nil
+    RebuildActivePlayers()
+end)
+
+local localCharConn = LP.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    ClearAllSkeletons()
+    ClearAllESP()
+    isLocalDead = false
+end)
+
+local localDiedConn = nil
+if LP.Character then
+    local hum = LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum then
+        localDiedConn = hum.Died:Connect(function()
+            isLocalDead = true
+        end)
+    end
+end
+
+-- ============================================================
+-- 17. LIGHTING
+-- ============================================================
+local function setFullBright(v)
+    Lighting.Brightness = v and 3 or 1
+    Lighting.FogEnd = v and 99999 or 1000
+    Lighting.OutdoorAmbient = v and Color3.fromRGB(255,255,255) or Color3.fromRGB(128,128,128)
+    Lighting.GlobalShadows = not v
+    Settings.FullBright.Enabled = v
+end
+
+local function setNoFog(v)
+    if v then
+        Lighting.FogEnd = 99999
+    else
+        Lighting.FogEnd = originalFogEnd
+    end
+    Settings.Visuals.NoFog = v
+end
+
+local function setNoBloom(v)
+    pcall(function()
+        for _, e in ipairs(Lighting:GetChildren()) do
+            if e:IsA("BloomEffect") then e.Enabled = not v end
+        end
+    end)
+    Settings.Visuals.NoBloom = v
+end
+
+local function setNoSunRays(v)
+    pcall(function()
+        for _, e in ipairs(Lighting:GetChildren()) do
+            if e:IsA("SunRaysEffect") then e.Enabled = not v end
+        end
+    end)
+    Settings.Visuals.NoSunRays = v
+end
+
+-- ============================================================
+-- 17.5. CUSTOM FOV
+-- ============================================================
+local function setCustomFOV(v, value)
+    local cam = GetCamera()
+    if not cam then return end
+    if v then
+        if Settings.Visuals.OriginalFOV == nil then
+            Settings.Visuals.OriginalFOV = cam.FieldOfView
+        end
+        cam.FieldOfView = value or Settings.Visuals.FOVValue
+    else
+        if Settings.Visuals.OriginalFOV then
+            cam.FieldOfView = Settings.Visuals.OriginalFOV
+        end
+    end
+    Settings.Visuals.CustomFOV = v
+end
+
+-- ============================================================
+-- 17.6. HIDE BODY / HANDS / TOOL
+-- ============================================================
+local HIDE_BODY_PARTS = {
+    "UpperTorso", "LowerTorso", "Torso",
+    "LeftUpperArm", "LeftLowerArm",
+    "RightUpperArm", "RightLowerArm",
+    "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
+    "RightUpperLeg", "RightLowerLeg", "RightFoot",
+}
+local HIDE_HANDS_PARTS = { "LeftHand", "RightHand" }
+
+local function ApplyHideBody()
+    if not LP.Character then return end
+    local char = LP.Character
+
+    for _, partName in ipairs(HIDE_BODY_PARTS) do
+        local part = char:FindFirstChild(partName)
+        if part and part:IsA("BasePart") then
+            if Settings.Visuals.HideBody then
+                part.LocalTransparencyModifier = 1
+            else
+                part.LocalTransparencyModifier = 0
+            end
+        end
+    end
+
+    for _, partName in ipairs(HIDE_HANDS_PARTS) do
+        local part = char:FindFirstChild(partName)
+        if part and part:IsA("BasePart") then
+            if Settings.Visuals.HideHands then
+                part.LocalTransparencyModifier = 1
+            else
+                part.LocalTransparencyModifier = 0
+            end
+        end
+    end
+
+    if Settings.Visuals.HideTool then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            local tool = hum:FindFirstChildOfClass("Tool") or char:FindFirstChildOfClass("Tool")
+            if tool then
+                for _, part in ipairs(tool:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.LocalTransparencyModifier = 1
+                    end
+                end
+            end
+        end
+    end
+end
+
+local function StartHideBody()
+    if hideBodyConnection then return end
+    hideBodyConnection = RunService.RenderStepped:Connect(function()
+        if isScriptUnloaded then return end
+        if Settings.Visuals.HideBody or Settings.Visuals.HideHands or Settings.Visuals.HideTool then
+            pcall(ApplyHideBody)
+        end
+    end)
+end
+
+local function StopHideBody()
+    if hideBodyConnection then
+        pcall(function() hideBodyConnection:Disconnect() end)
+        hideBodyConnection = nil
+    end
+end
+
+-- ============================================================
+-- 17.7. BULLET TRACERS
+-- ============================================================
+local function AcquireTracer()
+    local t = table_remove(TracerPool)
+    if t then
+        t.Visible = false
+        return t
+    end
+    t = Drawing.new("Line")
+    t.Thickness = 2
+    t.Visible = false
+    return t
+end
+
+local function ReleaseTracer(t)
+    if not t then return end
+    t.Visible = false
+    if #TracerPool < TracerPoolMAX then
+        table_insert(TracerPool, t)
+    else
+        pcall(function() t:Remove() end)
+    end
+end
+
+local function CreateTracer(fromPos, toPos)
+    if not Settings.Visuals.BulletTracers then return end
+    if not fromPos or not toPos then return end
+
+    local dist = (fromPos - toPos).Magnitude
+    if dist > Settings.Visuals.TracerMaxDistance then return end
+
+    local tracer = AcquireTracer()
+    tracer.Color = Settings.Visuals.TracerColor
+    tracer.Thickness = Settings.Visuals.TracerThickness
+    tracer.Transparency = 1
+    tracer.Visible = true
+
+    local data = {
+        tracer = tracer,
+        fromPos = fromPos,
+        toPos = toPos,
+        startTime = os_clock(),
+        lifetime = Settings.Visuals.TracerLifetime,
+    }
+    table_insert(ActiveTracers, data)
+end
+
+local function UpdateTracers()
+    if isScriptUnloaded then return end
+    local cam = GetCamera()
+    if not cam then return end
+    local now = os_clock()
+    local i = 1
+    while i <= #ActiveTracers do
+        local data = ActiveTracers[i]
+        local age = now - data.startTime
+        if age >= data.lifetime then
+            ReleaseTracer(data.tracer)
+            table_remove(ActiveTracers, i)
+        else
+            local t = data.tracer
+            local v1, o1 = cam:WorldToViewportPoint(data.fromPos)
+            local v2, o2 = cam:WorldToViewportPoint(data.toPos)
+            if o1 and o2 then
+                t.From = Vector2_new(v1.X, v1.Y)
+                t.To = Vector2_new(v2.X, v2.Y)
+                t.Transparency = 1 - (age / data.lifetime)
+                t.Visible = true
+            else
+                t.Visible = false
+            end
+            i = i + 1
+        end
+    end
+end
+
+local tracerLoopConn = nil
+
+local function StartTracerLoop()
+    if tracerLoopConn then return end
+    tracerLoopConn = RunService.RenderStepped:Connect(UpdateTracers)
+end
+
+local function StopTracerLoop()
+    if tracerLoopConn then
+        pcall(function() tracerLoopConn:Disconnect() end)
+        tracerLoopConn = nil
+    end
+    for _, data in ipairs(ActiveTracers) do
+        ReleaseTracer(data.tracer)
+    end
+    ActiveTracers = {}
+end
+
+local function ClearAllTracers()
+    for _, data in ipairs(ActiveTracers) do
+        ReleaseTracer(data.tracer)
+    end
+    ActiveTracers = {}
+    for _, t in ipairs(TracerPool) do
+        pcall(function() t:Remove() end)
+    end
+    TracerPool = {}
+end
+
+StartTracerLoop()
+
+-- ============================================================
+-- 18. WEAPON MODS
+-- ============================================================
+local noRecoilCache = {}
+
+local function RebuildNoRecoilCache()
+    noRecoilCache = {}
+    local function scan(tool)
+        if not tool:IsA("Tool") then return end
+        local af = tool:FindFirstChild("AttachmentFolder")
+        if not af then return end
+        for _, a in ipairs(af:GetChildren()) do
+            local ia = a:FindFirstChild("IsAttachment")
+            if ia and ia:IsA("StringValue") and ia.Value == "Sights" then
+                local stats = a:FindFirstChild("Stats")
+                if stats then
+                    for _, name in ipairs({
+                        "GunRecoil","GunRecoilX","GunRecoilAimed",
+                        "RecoilAngle","RecoilSpread","RecoilStrength",
+                        "AimSway","AimSpeed","AimScatterMultiplyer"
+                    }) do
+                        local s = stats:FindFirstChild(name)
+                        if s and s:IsA("NumberValue") then table_insert(noRecoilCache, s) end
+                    end
+                end
+            end
+        end
+    end
+    if LP.Character then
+        for _, t in ipairs(LP.Character:GetChildren()) do scan(t) end
+    end
+    if LP.Backpack then
+        for _, t in ipairs(LP.Backpack:GetChildren()) do scan(t) end
+    end
+end
+
+local function StartNoRecoil()
+    if noRecoilRunning then return end
+    noRecoilRunning = true
+    RebuildNoRecoilCache()
+    table_insert(noRecoilConnections, LP.CharacterAdded:Connect(RebuildNoRecoilCache))
+    if LP.Backpack then
+        table_insert(noRecoilConnections, LP.Backpack.ChildAdded:Connect(RebuildNoRecoilCache))
+    end
+
+    local c1 = RunService.Heartbeat:Connect(function()
+        if not noRecoilRunning then return end
+        pcall(function()
+            local r = LP:FindFirstChild("Recoil")
+            if r then
+                for _, c in ipairs(r:GetDescendants()) do
+                    if c:IsA("CFrameValue") then c.Value = CFrame.new()
+                    elseif c:IsA("NumberValue") then c.Value = 0 end
+                end
+            end
+        end)
+    end)
+    table_insert(noRecoilConnections, c1)
+
+    local c2 = RunService.Heartbeat:Connect(function()
+        if not noRecoilRunning then return end
+        pcall(function()
+            local char = LP.Character
+            if not char then return end
+            local gav = char:FindFirstChild("GUNAIMVALUE")
+            if gav then
+                for _, c in ipairs(gav:GetChildren()) do
+                    if c:IsA("NumberValue") then c.Value = 0 end
+                end
+            end
+        end)
+    end)
+    table_insert(noRecoilConnections, c2)
+
+    local c3 = RunService.Heartbeat:Connect(function()
+        if not noRecoilRunning then return end
+        pcall(function()
+            for _, s in ipairs(noRecoilCache) do
+                if s and s.Parent then s.Value = 0 end
+            end
+        end)
+    end)
+    table_insert(noRecoilConnections, c3)
+
+    local c4 = RunService.RenderStepped:Connect(function()
+        if not noRecoilRunning then return end
+        pcall(function()
+            local r = LP:FindFirstChild("Recoil")
+            if r then
+                local a = r:FindFirstChild("CurrentRecoil")
+                local b = r:FindFirstChild("CurrentRecoil2")
+                local cc = r:FindFirstChild("CurrentRecoil3")
+                if a and a:IsA("CFrameValue") then a.Value = CFrame.new() end
+                if b and b:IsA("CFrameValue") then b.Value = CFrame.new() end
+                if cc and cc:IsA("NumberValue") then cc.Value = 0 end
+            end
+        end)
+    end)
+    table_insert(noRecoilConnections, c4)
+
+    local c5 = RunService.Heartbeat:Connect(function()
+        if not noRecoilRunning then return end
+        pcall(function()
+            local char = LP.Character
+            if not char then return end
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if not hum then return end
+            for _, t in ipairs(hum:GetPlayingAnimationTracks()) do
+                if not t.Animation then continue end
+                local low = (t.Animation.Name or ""):lower()
+                if low:find("fire") or low:find("recoil") or low:find("aim") then
+                    t:AdjustSpeed(999)
+                end
+            end
+        end)
+    end)
+    table_insert(noRecoilConnections, c5)
+
+    local c6 = RunService.Heartbeat:Connect(function()
+        if not noRecoilRunning then return end
+        pcall(function()
+            local char = LP.Character
+            if not char then return end
+            for _, tool in ipairs(char:GetChildren()) do
+                if not tool:IsA("Tool") then continue end
+                for n, v in pairs({
+                    GunRecoil=0, GunRecoilX=0, RecoilAngle=0,
+                    RecoilSpread=0, RecoilStrength=0, AimSway=0
+                }) do
+                    local e = tool:FindFirstChild(n)
+                    if not e then
+                        local nv = Instance.new("NumberValue")
+                        nv.Name = n; nv.Value = v; nv.Parent = tool
+                    else
+                        e.Value = v
+                    end
+                end
+            end
+        end)
+    end)
+    table_insert(noRecoilConnections, c6)
+
+    local c7 = RunService.Heartbeat:Connect(function()
+        if not noRecoilRunning then return end
+        pcall(function()
+            local function scanForSights(parent)
+                if not parent then return end
+                for _, ch in ipairs(parent:GetChildren()) do
+                    if ch:IsA("Folder") and ch.Name == "AttachmentFolder" then
+                        for _, a in ipairs(ch:GetChildren()) do
+                            local ia = a:FindFirstChild("IsAttachment")
+                            if ia and ia:IsA("StringValue") and ia.Value == "Sights" then
+                                local stats = a:FindFirstChild("Stats")
+                                if stats then
+                                    for _, s in ipairs(stats:GetChildren()) do
+                                        if s:IsA("NumberValue") then
+                                            local nm = s.Name
+                                            if nm:find("Recoil") or nm:find("Sway") or nm:find("Spread") or nm:find("Scatter") then
+                                                s.Value = 0
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    scanForSights(ch)
+                end
+            end
+            scanForSights(LP.Backpack)
+            if LP.Character then scanForSights(LP.Character) end
+        end)
+    end)
+    table_insert(noRecoilConnections, c7)
+end
+
+local function StopNoRecoil()
+    noRecoilRunning = false
+    for _, c in ipairs(noRecoilConnections) do
+        pcall(function() c:Disconnect() end)
+    end
+    noRecoilConnections = {}
+end
+
+local noSpreadCache = {}
+
+local function RebuildNoSpreadCache()
+    noSpreadCache = {}
+    local char = LP.Character
+    if not char then return end
+    for _, tool in ipairs(char:GetChildren()) do
+        if tool:IsA("Tool") then
+            local gs = tool:FindFirstChild("GunScript") or tool:FindFirstChild("Gun")
+            if gs then
+                local sc = gs:FindFirstChild("scatter") or gs:FindFirstChild("Spread") or gs:FindFirstChild("BulletSpread")
+                if sc and sc:IsA("NumberValue") then table_insert(noSpreadCache, sc) end
+                local as = gs:FindFirstChild("AimScatterMultiplyer") or gs:FindFirstChild("AimSpread")
+                if as and as:IsA("NumberValue") then table_insert(noSpreadCache, as) end
+            end
+        end
+    end
+end
+
+local function StartNoSpread()
+    if noSpreadThread then return end
+    noSpreadRunning = true
+    RebuildNoSpreadCache()
+    noSpreadThread = task.spawn(function()
+        while noSpreadRunning do
+            pcall(function()
+                for _, s in ipairs(noSpreadCache) do
+                    if s and s.Parent then s.Value = 0 end
+                end
+            end)
+            task.wait(0.2)
+        end
+    end)
+end
+
+local function StopNoSpread()
+    noSpreadRunning = false
+    if noSpreadThread then task.cancel(noSpreadThread); noSpreadThread = nil end
+end
+
+local swayCache = {}
+
+local function RebuildSwayCache()
+    swayCache = {}
+    if not LP.Character then return end
+    for _, obj in ipairs(LP.Character:GetDescendants()) do
+        if obj:IsA("NumberValue") and string_find(obj.Name:lower(), "sway") then
+            table_insert(swayCache, obj)
+        end
+    end
+end
+
+local function StartNoSway()
+    if noSwayThread then return end
+    noSwayRunning = true
+    RebuildSwayCache()
+    noSwayThread = task.spawn(function()
+        while noSwayRunning do
+            pcall(function()
+                local char = LP.Character
+                if char then
+                    local gav = char:FindFirstChild("GUNAIMVALUE") or char:FindFirstChild("GunAimValue")
+                    if gav then
+                        for _, c in ipairs(gav:GetChildren()) do
+                            if c:IsA("NumberValue") then c.Value = 0 end
+                        end
+                    end
+                end
+                for _, obj in ipairs(swayCache) do
+                    if obj and obj.Parent then obj.Value = 0 end
+                end
+            end)
+            task.wait(0.1)
+        end
+    end)
+end
+
+local function StopNoSway()
+    noSwayRunning = false
+    if noSwayThread then task.cancel(noSwayThread); noSwayThread = nil end
+end
+
+-- ============================================================
+-- 19. X-RAY
+-- ============================================================
+local function StartXRay()
+    if xrayThread then return end
+    xrayActive = true
+    xrayThread = task.spawn(function()
+        local partList, lastRefresh = {}, 0
+        local lastPartCleanup = 0
+        while xrayActive do
+            pcall(function()
+                local cam = GetCamera()
+                local camPos = cam.CFrame.Position
+                local camLook = cam.CFrame.LookVector
+                local now = os_clock()
+                if now - lastRefresh > 2 then
+                    partList = {}
+                    for _, part in ipairs(Workspace:GetDescendants()) do
+                        if part:IsA("BasePart")
+                            and part ~= cam
+                            and (not LP.Character or not part:IsDescendantOf(LP.Character))
+                            and part.Transparency < 0.9 and part.Parent
+                        then
+                            if originalTransparency[part] == nil then
+                                originalTransparency[part] = part.Transparency
+                            end
+                            table_insert(partList, part)
+                        end
+                    end
+                    lastRefresh = now
+                end
+                for _, part in ipairs(partList) do
+                    if not part.Parent then continue end
+                    local orig = originalTransparency[part] or 0
+                    local nl = part.Name:lower()
+                    if string_find(nl, "floor") or string_find(nl, "ground")
+                        or string_find(nl, "terrain")
+                        or (part.Parent and part.Parent:IsA("Tool"))
+                    then
+                        part.Transparency = orig
+                        continue
+                    end
+                    local dir = (part.Position - camPos)
+                    if dir.Magnitude > 0.1 then
+                        local dot = camLook:Dot(dir.Unit)
+                        if dot > 0.3 then
+                            part.Transparency = math.max(orig, 0.75)
+                        else
+                            part.Transparency = orig
+                        end
+                    end
+                end
+                if now - lastPartCleanup > 30 then
+                    lastPartCleanup = now
+                    for part in pairs(originalTransparency) do
+                        if not part or not part.Parent then
+                            originalTransparency[part] = nil
+                        end
+                    end
+                end
+            end)
+            task.wait(0.15)
+        end
+    end)
+end
+
+local function StopXRay()
+    xrayActive = false
+    if xrayThread then task.cancel(xrayThread); xrayThread = nil end
+    pcall(function()
+        for part, t in pairs(originalTransparency) do
+            if part and part.Parent then part.Transparency = t end
+        end
+        originalTransparency = {}
+    end)
+end
+
+-- ============================================================
+-- 20. TARGET MANAGER
+-- ============================================================
+local TargetManager = {}
+local currentTarget = nil
+local whitelist = {}
+
+local deadBlacklist = {}
+local DEAD_BLACKLIST_DURATION = 3
+
+local function IsDeadBlacklisted(playerName)
+    local expiry = deadBlacklist[playerName]
+    if not expiry then return false end
+    if os_clock() > expiry then
+        deadBlacklist[playerName] = nil
+        return false
+    end
+    return true
+end
+
+local function AddToDeadBlacklist(playerName)
+    deadBlacklist[playerName] = os_clock() + DEAD_BLACKLIST_DURATION
+end
+
+local targetTransition = {
+    active = false,
+    startCFrame = nil,
+    targetCFrame = nil,
+    progress = 0,
+    duration = 0.25,
+    previousPlayer = nil,
+}
+local TARGET_TRANSITION_DURATION = 0.25
+
+local function IsWhitelisted(player)
+    if not player then return false end
+    return whitelist[player.UserId] == true
+end
+
+local function GetNearestBodyPart(player)
+    if not player or not player.Character then return nil end
+    local char = player.Character
+    local cam = GetCamera()
+    if not cam then return nil end
+    local centerX = cam.ViewportSize.X / 2
+    local centerY = cam.ViewportSize.Y / 2
+    local centerVec = Vector2_new(centerX, centerY)
+    local best, bestDist = nil, math.huge
+    local rigType = GetRigType(char)
+    local partList = rigType == "R15" and BODY_PARTS or BODY_PARTS_R6
+    for _, partName in ipairs(partList) do
+        local part = char:FindFirstChild(partName)
+        if part and part:IsA("BasePart") then
+            local pos, onScreen = cam:WorldToViewportPoint(part.Position)
+            if onScreen then
+                local screenPos = Vector2_new(pos.X, pos.Y)
+                local dist = (screenPos - centerVec).Magnitude
+                if dist < bestDist then
+                    bestDist = dist
+                    best = part
+                end
+            end
+        end
+    end
+    return best
+end
+
+function TargetManager:GetCandidates()
+    local candidates = {}
+    if not LP.Character then return candidates end
+    local lr = LP.Character:FindFirstChild("HumanoidRootPart")
+    if not lr then return candidates end
+
+    for _, player in ipairs(activePlayers) do
+        if IsWhitelisted(player) then continue end
+        if IsDeadBlacklisted(player.Name) then continue end
+        if not self:ValidateTarget(player) then continue end
+        if Settings.Aimbot.TeamCheck and player.Team == LP.Team then continue end
+        if Settings.Aimbot.IgnorePassive and IsPassive(player.Name) then continue end
+
+        local tr = player.Character.HumanoidRootPart
+        local dist = (lr.Position - tr.Position).Magnitude
+        if Settings.Aimbot.MaxDistance > 0 and dist > Settings.Aimbot.MaxDistance then continue end
+
+        if Settings.Aimbot.WallCheck then
+            local vis = CheckVisibility(player)
+            if Settings.Aimbot.StrictWallCheck and vis ~= "visible" then continue end
+            if vis == "hidden" then continue end
+        end
+
+        local aimPart
+        if Settings.Aimbot.AimPartMode == "Auto (Nearest to Crosshair)" then
+            aimPart = GetNearestBodyPart(player)
+        else
+            aimPart = player.Character:FindFirstChild(Settings.Aimbot.AimPartMode)
+            if not aimPart then
+                aimPart = player.Character:FindFirstChild("Head")
+                    or player.Character:FindFirstChild("HumanoidRootPart")
+            end
+        end
+        if not aimPart then continue end
+
+        local tp = aimPart.Position
+        if Settings.Aimbot.UsePrediction then
+            local root = player.Character:FindFirstChild("HumanoidRootPart")
+            if root and root.Velocity then
+                tp = tp + root.Velocity * Settings.Aimbot.PredictionAmount
+            end
+        end
+
+        local sp, onScreen = GetCamera():WorldToViewportPoint(tp)
+        if not onScreen then continue end
+
+        local center = helperMousePosition
+        local gameFOV = GetCamera().FieldOfView or 70
+        local vs = GetCamera().ViewportSize
+        local half = vs.X / 2
+        local radius = half * math_tan(math_rad(Settings.Aimbot.FOV / 2)) / math_tan(math_rad(gameFOV / 2))
+        local dc = (Vector2_new(sp.X, sp.Y) - center).Magnitude
+        if dc > radius then continue end
+
+        if Settings.Aimbot.Anti360.Enabled and anti360Active and currentTargetForAnti360 == player then
+            continue
+        end
+
+        table_insert(candidates, {
+            player = player, part = aimPart, targetPos = tp,
+            distance = dist, screenDist = dc, screenPos = sp,
+        })
+    end
+    return candidates
+end
+
+function TargetManager:ValidateTarget(player)
+    if not player or player == LP then return false end
+    if IsDeadBlacklisted(player.Name) then return false end
+    if not player.Character then return false end
+
+    local char = player.Character
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+
+    if hum.Health <= 0 then
+        AddToDeadBlacklist(player.Name)
+        return false
+    end
+
+    local state = hum:GetState()
+    if state == Enum.HumanoidStateType.Dead
+        or state == Enum.HumanoidStateType.Dying
+        or state == Enum.HumanoidStateType.Physics then
+        AddToDeadBlacklist(player.Name)
+        return false
+    end
+
+    if not char.Parent or char.Parent ~= Workspace then
+        AddToDeadBlacklist(player.Name)
+        return false
+    end
+
+    if not char:FindFirstChild("HumanoidRootPart") then
+        AddToDeadBlacklist(player.Name)
+        return false
+    end
+
+    if not char:FindFirstChild("Head") then
+        AddToDeadBlacklist(player.Name)
+        return false
+    end
+
+    return true
+end
+
+function TargetManager:GetBestTarget()
+    local c = self:GetCandidates()
+    if #c == 0 then
+        self:ClearTarget()
+        targetTransition.active = false
+        targetTransition.previousPlayer = nil
+        return nil
+    end
+    local pr = Settings.Aimbot.Priority or "Distance"
+    local best, bs = nil, math.huge
+    for _, x in ipairs(c) do
+        local s = (pr == "Distance") and x.distance or x.screenDist
+        if s < bs then bs = s; best = x end
+    end
+    return best
+end
+
+function TargetManager:LockTarget(t)
+    if not t then self:ClearTarget(); return end
+    if currentTarget and currentTarget.player == t.player then return end
+    if currentTarget and currentTarget.player and currentTarget.part
+        and t.part and t.part.Parent then
+        local cam = GetCamera()
+        targetTransition.active = true
+        targetTransition.startCFrame = cam.CFrame
+        targetTransition.targetCFrame = CFrame_new(cam.CFrame.Position, t.part.Position)
+        targetTransition.progress = 0
+        targetTransition.previousPlayer = currentTarget.player
+    end
+    currentTarget = t
+end
+
+function TargetManager:UpdateTarget()
+    if not currentTarget or not currentTarget.player then self:ClearTarget(); return end
+    if not self:ValidateTarget(currentTarget.player) then self:ClearTarget(); return end
+    if IsWhitelisted(currentTarget.player) then self:ClearTarget(); return end
+
+    local lr = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if not lr then self:ClearTarget(); return end
+    local d = (currentTarget.player.Character.HumanoidRootPart.Position - lr.Position).Magnitude
+    if Settings.Aimbot.MaxDistance > 0 and d > Settings.Aimbot.MaxDistance then
+        self:ClearTarget(); return
+    end
+
+    local aimPart
+    if Settings.Aimbot.AimPartMode == "Auto (Nearest to Crosshair)" then
+        aimPart = GetNearestBodyPart(currentTarget.player)
+    else
+        aimPart = currentTarget.player.Character:FindFirstChild(Settings.Aimbot.AimPartMode)
+        if not aimPart then
+            aimPart = currentTarget.player.Character:FindFirstChild("Head")
+                or currentTarget.player.Character:FindFirstChild("HumanoidRootPart")
+        end
+    end
+
+    if not aimPart then self:ClearTarget(); return end
+    currentTarget.part = aimPart
+    currentTarget.targetPos = aimPart.Position
+end
+
+function TargetManager:ClearTarget() currentTarget = nil end
+function TargetManager:GetCurrentTarget() return currentTarget end
+
+function TargetManager:AddToWhitelist(player)
+    if whitelist[player.UserId] then
+        whitelist[player.UserId] = nil
+    else
+        whitelist[player.UserId] = true
+    end
+    if currentTarget and currentTarget.player == player then self:ClearTarget() end
+end
+
+function TargetManager:IsWhitelisted(player)
+    return IsWhitelisted(player)
+end
+
+-- ============================================================
+-- 21. AIMBOT / TARGET INDICATOR
+-- ============================================================
+local lastFrameTime = 0
+
+local function CheckAnti360()
+    if not Settings.Aimbot.Anti360.Enabled then
+        anti360Active = false
+        currentTargetForAnti360 = nil
+        anti360Cooldown = 0
+        return false
+    end
+    local now = os_clock()
+    if anti360Active and now < anti360Cooldown then
+        return true
+    end
+    local lr = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if not lr then
+        anti360Active = false
+        currentTargetForAnti360 = nil
+        return false
+    end
+    local closest, cd = nil, Settings.Aimbot.Anti360.DetectionDistance + Settings.Aimbot.Anti360.Hysteresis
+    for _, p in ipairs(activePlayers) do
+        if not TargetManager:ValidateTarget(p) then continue end
+        if Settings.Aimbot.TeamCheck and p.Team == LP.Team then continue end
+        if Settings.Aimbot.IgnorePassive and IsPassive(p.Name) then continue end
+        local d = (p.Character.HumanoidRootPart.Position - lr.Position).Magnitude
+        if d < cd then cd = d; closest = p end
+    end
+    if not closest then
+        anti360Active = false
+        currentTargetForAnti360 = nil
+        return false
+    end
+    local vel = closest.Character.HumanoidRootPart.AssemblyLinearVelocity or Vector3_new(0,0,0)
+    local lat = Vector3_new(vel.X, 0, vel.Z)
+    if cd <= Settings.Aimbot.Anti360.DetectionDistance and lat.Magnitude > 3 then
+        if not anti360Active then
+            anti360Active = true
+            currentTargetForAnti360 = closest
+            anti360Cooldown = now + Settings.Aimbot.Anti360.ReEnableDelay
+        end
+        return true
+    end
+    if anti360Active then
+        if cd > (Settings.Aimbot.Anti360.DetectionDistance + Settings.Aimbot.Anti360.Hysteresis) then
+            anti360Active = false
+            currentTargetForAnti360 = nil
+            anti360Cooldown = now + Settings.Aimbot.Anti360.ReEnableDelay
+            return false
+        end
+        return true
+    end
+    return false
+end
+
+local function MainAimbotLoop()
+    if isScriptUnloaded or not Settings.Aimbot.Enabled then return end
+    if isLocalDead or IsMenuOpen() then return end
+    if Has("isrbxactive") and not isrbxactive() then return end
+
+    local now = os_clock()
+    local dt = now - lastFrameTime
+    lastFrameTime = now
+    if dt > 0.5 then dt = 0.5 end
+
+    local held
+    if Settings.Aimbot.AimKeyType == "Key" then held = aimKeyHeld
+    else held = UserInputService:IsMouseButtonPressed(Settings.Aimbot.AimMouseButton) end
+    if not held then
+        targetTransition.active = false
+        return
+    end
+
+    if CheckAnti360() then
+        TargetManager:ClearTarget()
+        targetTransition.active = false
+        return
+    end
+
+    -- Sticky Lock logic
+    if Settings.Aimbot.StickyLock and currentTarget and currentTarget.player then
+        local stillValid = TargetManager:ValidateTarget(currentTarget.player)
+        if stillValid then
+            stickyTarget = currentTarget.player
+            stickyLastSeen = now
+        else
+            if (now - stickyLastSeen) > Settings.Aimbot.StickyTimeout then
+                TargetManager:ClearTarget()
+                stickyTarget = nil
+            end
+        end
+    elseif not Settings.Aimbot.StickyLock then
+        stickyTarget = nil
+    end
+
+    TargetManager:UpdateTarget()
+
+    if Settings.Aimbot.StickyLock and stickyTarget and stickyTarget.Character then
+        local stHum = stickyTarget.Character:FindFirstChildOfClass("Humanoid")
+        if stHum and stHum.Health > 0 then
+            local stPart = stickyTarget.Character:FindFirstChild("Head")
+                or stickyTarget.Character:FindFirstChild("HumanoidRootPart")
+            if stPart then
+                currentTarget = {
+                    player = stickyTarget,
+                    part = stPart,
+                    targetPos = stPart.Position,
+                    distance = 0,
+                    screenDist = 0,
+                    screenPos = Vector2_new(0, 0),
+                }
+            end
+        end
+    end
+
+    if currentTarget and currentTarget.player ~= targetTransition.previousPlayer then
+        local aimPos = currentTarget.part and currentTarget.part.Position or nil
+        if aimPos then
+            local cam = GetCamera()
+            targetTransition.active = true
+            targetTransition.startCFrame = cam.CFrame
+            targetTransition.targetCFrame = CFrame_new(cam.CFrame.Position, aimPos)
+            targetTransition.progress = 0
+            targetTransition.duration = TARGET_TRANSITION_DURATION
+            targetTransition.previousPlayer = currentTarget.player
+        end
+    elseif not currentTarget then
+        targetTransition.previousPlayer = nil
+    end
+
+    if not TargetManager:GetCurrentTarget() then
+        local nt = TargetManager:GetBestTarget()
+        if nt then
+            TargetManager:LockTarget(nt)
+            local cam = GetCamera()
+            targetTransition.active = true
+            targetTransition.startCFrame = cam.CFrame
+            targetTransition.targetCFrame = CFrame_new(cam.CFrame.Position, nt.part.Position)
+            targetTransition.progress = 0
+            targetTransition.duration = TARGET_TRANSITION_DURATION
+            targetTransition.previousPlayer = nt.player
+        end
+    end
+
+    local t = TargetManager:GetCurrentTarget()
+    if not t then return end
+
+    if CheckAnti360() then
+        TargetManager:ClearTarget()
+        targetTransition.active = false
+        return
+    end
+
+    local ap = t.part
+    if not ap or not ap.Parent then
+        TargetManager:ClearTarget()
+        return
+    end
+
+    if targetTransition.active then
+        targetTransition.progress = targetTransition.progress + (dt / targetTransition.duration)
+        if targetTransition.progress >= 1 then
+            targetTransition.progress = 1
+            targetTransition.active = false
+        end
+
+        local cam = GetCamera()
+        local eased = 1 - math.pow(1 - targetTransition.progress, 3)
+        local newTargetCF = CFrame_new(cam.CFrame.Position, ap.Position)
+        targetTransition.targetCFrame = newTargetCF
+
+        pcall(function()
+            cam.CFrame = targetTransition.startCFrame:Lerp(targetTransition.targetCFrame, eased)
+        end)
+        return
+    end
+
+    local aimPos = ap.Position
+    if Settings.Aimbot.UsePrediction then
+        local root = t.player.Character:FindFirstChild("HumanoidRootPart")
+        if root and root.Velocity then
+            aimPos = aimPos + root.Velocity * Settings.Aimbot.PredictionAmount
+        end
+    end
+
+    local sm = aimbotHelperActive and Settings.Aimbot.HelperSmoothness or Settings.Aimbot.BaseSmoothness
+
+    local lr = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    if Settings.Aimbot.Anti360.Enabled and lr then
+        for _, p in ipairs(activePlayers) do
+            if p ~= LP and p.Character then
+                local pRoot = p.Character:FindFirstChild("HumanoidRootPart")
+                if pRoot then
+                    local d = (pRoot.Position - lr.Position).Magnitude
+                    if d <= Settings.Aimbot.Anti360.DetectionDistance then
+                        sm = 1
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    local cam = GetCamera()
+    if Settings.Aimbot.Method == "Camera" then
+        if sm >= 1 then
+            return
+        elseif sm <= 0 then
+            pcall(function() cam.CFrame = CFrame_new(cam.CFrame.Position, aimPos) end)
+        else
+            pcall(function()
+                local tcf = CFrame_new(cam.CFrame.Position, aimPos)
+                local f = math_clamp(1 - sm, 0.01, 1)
+                cam.CFrame = cam.CFrame:Lerp(tcf, f)
+            end)
+        end
+    else
+        local sp = cam:WorldToViewportPoint(aimPos)
+        local d = Vector2_new(sp.X - helperMousePosition.X, sp.Y - helperMousePosition.Y)
+        if d.Magnitude > 0.5 then
+            if sm >= 1 then
+                return
+            elseif sm <= 0 then
+                mousemoverel(d.X, d.Y)
+            else
+                local f = math_clamp(1 - sm, 0.01, 1)
+                mousemoverel(d.X * f, d.Y * f)
+            end
+        end
+    end
+end
+
+local aimbotConn = RunService.RenderStepped:Connect(MainAimbotLoop)
+
+local fovCircle = nil
+local fovConn = RunService.RenderStepped:Connect(function()
+    if not fovCircle then
+        fovCircle = Drawing.new("Circle")
+        fovCircle.Filled = false
+        fovCircle.Visible = false
+    end
+    fovCircle.Visible = Settings.Aimbot.ShowFOV and Settings.Aimbot.Enabled and not IsMenuOpen()
+    if fovCircle.Visible then
+        local cam = GetCamera()
+        local gf = cam.FieldOfView or 70
+        local half = cam.ViewportSize.X / 2
+        local r = half * math_tan(math_rad(Settings.Aimbot.FOV / 2)) / math_tan(math_rad(gf / 2))
+        local mp = UserInputService:GetMouseLocation()
+        fovCircle.Position = Vector2_new(mp.X, mp.Y)
+        fovCircle.Radius = r
+        fovCircle.Color = Settings.Aimbot.FOVColor
+        fovCircle.Thickness = Settings.Aimbot.FOVThickness
+    end
+end)
+
+local targetIndicatorConn = RunService.RenderStepped:Connect(function()
+    if isScriptUnloaded then return end
+    if not Settings.Aimbot.Enabled then
+        if targetIndicator then targetIndicator.Visible = false end
+        return
+    end
+    if not targetIndicator then
+        targetIndicator = Drawing.new("Circle")
+        targetIndicator.Filled = false
+        targetIndicator.Thickness = 2
+        targetIndicator.Color = Color3.fromRGB(255, 0, 0)
+        targetIndicator.Visible = false
+    end
+    local t = TargetManager:GetCurrentTarget()
+    if t and t.part and t.part.Parent then
+        local sp, onScreen = GetCamera():WorldToViewportPoint(t.part.Position)
+        if onScreen then
+            targetIndicator.Position = Vector2_new(sp.X, sp.Y)
+            targetIndicator.Radius = 10
+            targetIndicator.Visible = true
+        else
+            targetIndicator.Visible = false
+        end
+    else
+        targetIndicator.Visible = false
+    end
+end)
+
+local aimKeyBeganConn = UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.Y then
+        aimbotHelperActive = not aimbotHelperActive
+        if _env.TownUI_Window and _env.TownUI_Window.Notify then
+            pcall(function()
+                _env.TownUI_Window:Notify("Helper",
+                    aimbotHelperActive and "Aim: Head" or "Aim: Torso",
+                    1.5, "Info")
+            end)
+        end
+    end
+    if input.KeyCode == Settings.Aimbot.AimKey then aimKeyHeld = true end
+end)
+
+local aimKeyEndedConn = UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Settings.Aimbot.AimKey then aimKeyHeld = false end
+end)
+
+-- ============================================================
+-- 21.5. AIM ASSIST 
+-- ============================================================
+local function GetAimAssistTarget()
+    if not LP.Character then return nil end
+    local lr = LP.Character:FindFirstChild("HumanoidRootPart")
+    if not lr then return nil end
+    local cam = GetCamera()
+    if not cam then return nil end
+
+    local center = helperMousePosition
+    local gameFOV = cam.FieldOfView or 70
+    local vs = cam.ViewportSize
+    local half = vs.X / 2
+    local radius = half * math_tan(math_rad(Settings.AimAssist.FOV / 2)) / math_tan(math_rad(gameFOV / 2))
+
+    local best, bestScore = nil, math.huge
+
+    for _, player in ipairs(activePlayers) do
+        if not player or player == LP then continue end
+        if IsWhitelisted(player) then continue end
+        if IsDeadBlacklisted(player.Name) then continue end
+        if not player.Character then continue end
+
+        local hum = player.Character:FindFirstChildOfClass("Humanoid")
+        if not hum or hum.Health <= 0 then continue end
+
+        if Settings.AimAssist.TeamCheck and player.Team == LP.Team then continue end
+        if Settings.AimAssist.IgnorePassive and IsPassive(player.Name) then continue end
+
+        local part = player.Character:FindFirstChild(Settings.AimAssist.AimPart)
+        if not part then
+            part = player.Character:FindFirstChild("Head")
+                or player.Character:FindFirstChild("HumanoidRootPart")
+        end
+        if not part then continue end
+
+        local tr = player.Character:FindFirstChild("HumanoidRootPart")
+        if not tr then continue end
+        local dist = (lr.Position - tr.Position).Magnitude
+        if Settings.AimAssist.MaxDistance > 0 and dist > Settings.AimAssist.MaxDistance then continue end
+
+        if Settings.AimAssist.WallCheck then
+            local vis = CheckVisibility(player)
+            if Settings.AimAssist.Visible and vis ~= "visible" then continue end
+            if not Settings.AimAssist.Visible and vis == "hidden" then continue end
+        end
+
+        local targetPos = part.Position
+        if Settings.AimAssist.UsePrediction then
+            if tr.Velocity then
+                targetPos = targetPos + tr.Velocity * Settings.AimAssist.PredictionAmount
+            end
+        end
+
+        local sp, onScreen = cam:WorldToViewportPoint(targetPos)
+        if not onScreen then continue end
+
+        local dc = (Vector2_new(sp.X, sp.Y) - center).Magnitude
+        if dc > radius then continue end
+
+        local score = (Settings.AimAssist.Priority == "Distance") and dist or dc
+        if score < bestScore then
+            bestScore = score
+            best = {
+                player = player,
+                part = part,
+                targetPos = targetPos,
+                distance = dist,
+                screenDist = dc,
+                screenPos = sp,
+            }
+        end
+    end
+
+    return best
+end
+
+local function AimAssistLoop()
+    if isScriptUnloaded or not Settings.AimAssist.Enabled then return end
+    if isLocalDead or IsMenuOpen() then return end
+    if Has("isrbxactive") and not isrbxactive() then return end
+
+    local now = os_clock()
+    local dt = now - aimAssistLastFrame
+    aimAssistLastFrame = now
+    if dt > 0.5 then dt = 0.5 end
+
+    local target = GetAimAssistTarget()
+    if not target then return end
+
+    local aimPos = target.targetPos
+    local sm = Settings.AimAssist.Smoothness
+    local cam = GetCamera()
+
+    if Settings.AimAssist.UseMouse then
+        local sp = cam:WorldToViewportPoint(aimPos)
+        local d = Vector2_new(sp.X - helperMousePosition.X, sp.Y - helperMousePosition.Y)
+        if d.Magnitude > 0.5 then
+            if sm <= 0 then
+                mousemoverel(d.X, d.Y)
+            else
+                local f = math_clamp(1 - sm, 0.01, 1)
+                mousemoverel(d.X * f, d.Y * f)
+            end
+        end
+    else
+        if sm <= 0 then
+            pcall(function() cam.CFrame = CFrame_new(cam.CFrame.Position, aimPos) end)
+        else
+            pcall(function()
+                local tcf = CFrame_new(cam.CFrame.Position, aimPos)
+                local f = math_clamp(1 - sm, 0.01, 1)
+                cam.CFrame = cam.CFrame:Lerp(tcf, f)
+            end)
+        end
+    end
+end
+
+local function StartAimAssist()
+    if aimAssistConnection then return end
+    aimAssistActive = true
+    aimAssistLastFrame = os_clock()
+    aimAssistConnection = RunService.RenderStepped:Connect(AimAssistLoop)
+
+    if not aimAssistFOVCircle then
+        aimAssistFOVCircle = Drawing.new("Circle")
+        aimAssistFOVCircle.Filled = false
+        aimAssistFOVCircle.Visible = false
+    end
+
+    if not aimAssistFOVConn then
+        aimAssistFOVConn = RunService.RenderStepped:Connect(function()
+            if isScriptUnloaded then return end
+            if not aimAssistFOVCircle then return end
+            aimAssistFOVCircle.Visible = Settings.AimAssist.ShowFOV
+                and Settings.AimAssist.Enabled
+                and not IsMenuOpen()
+            if aimAssistFOVCircle.Visible then
+                local cam = GetCamera()
+                local gf = cam.FieldOfView or 70
+                local half = cam.ViewportSize.X / 2
+                local r = half * math_tan(math_rad(Settings.AimAssist.FOV / 2)) / math_tan(math_rad(gf / 2))
+                local mp = UserInputService:GetMouseLocation()
+                aimAssistFOVCircle.Position = Vector2_new(mp.X, mp.Y)
+                aimAssistFOVCircle.Radius = r
+                aimAssistFOVCircle.Color = Settings.AimAssist.FOVColor
+                aimAssistFOVCircle.Thickness = Settings.AimAssist.FOVThickness
+            end
+        end)
+    end
+end
+
+local function StopAimAssist()
+    aimAssistActive = false
+    if aimAssistConnection then
+        pcall(function() aimAssistConnection:Disconnect() end)
+        aimAssistConnection = nil
+    end
+    if aimAssistFOVConn then
+        pcall(function() aimAssistFOVConn:Disconnect() end)
+        aimAssistFOVConn = nil
+    end
+    if aimAssistFOVCircle then
+        pcall(function() aimAssistFOVCircle:Remove() end)
+        aimAssistFOVCircle = nil
+    end
+end
+
+-- ============================================================
+-- 22. SYNC BOOSTER
+-- ============================================================
+local function SafeSetFPS(cap)
+    if Has("setfpscap") then pcall(function() setfpscap(cap) end) end
+end
+
+local function GetCurrentFPS()
+    if Has("getfpscap") then return getfpscap() end
+    return 0
+end
+
+local function GetCurrentSimRadius()
+    if Has("gethiddenproperty") then
+        local ok, current = pcall(gethiddenproperty, LP, "SimulationRadius")
+        if ok then return current end
+    end
+    return nil
+end
+
+local SYNC_RADIUS_BOOSTED     = 400
+local SYNC_RADIUS_BOOSTED_MAX = 400
+local SYNC_RADIUS_DEFAULT     = 100
+local SYNC_RADIUS_DEFAULT_MAX = 100
+local SYNC_FPS_CAP_WHEN_ON    = 60
+local SYNC_FPS_CAP_WHEN_OFF   = 0
+local SYNC_LOW_FPS_THRESHOLD  = 30
+local SYNC_LOW_FPS_TICKS      = 60
+
+local syncData = {
+    enabled = false,
+    connection = nil,
+    lastUpdate = 0,
+    UPDATE_INTERVAL = 0.05,
+    originalFPSCap = nil,
+    radiusResetCount = 0,
+    lowFPSCount = 0,
+    fflagFallbackTried = false,
+}
+
+local function ApplySimulationRadius(radius, maxRadius, force)
+    if not force then
+        local current = GetCurrentSimRadius()
+        if current and current >= radius then return end
+        syncData.radiusResetCount = syncData.radiusResetCount + 1
+    end
+    if Has("setsimulationradius") then
+        pcall(setsimulationradius, radius, maxRadius)
+    end
+    if Has("sethiddenproperty") then
+        pcall(sethiddenproperty, LP, "SimulationRadius", radius)
+        pcall(sethiddenproperty, LP, "MaxSimulationRadius", maxRadius)
+    end
+end
+
+local function TryFFlagFallback()
+    if syncData.fflagFallbackTried then return end
+    syncData.fflagFallbackTried = true
+    if not Settings.Sync.TryFFlagFallback then return end
+    if not Has("setfflag") then return end
+    pcall(setfflag, "DFIntS2PhysicsSenderRate", 60)
+end
+
+local function SyncTick()
+    if not syncData.enabled then return end
+    ApplySimulationRadius(SYNC_RADIUS_BOOSTED, SYNC_RADIUS_BOOSTED_MAX, false)
+end
+
+local function StartSyncBooster()
+    if syncData.enabled then return end
+    syncData.enabled = true
+    if syncData.originalFPSCap == nil then
+        syncData.originalFPSCap = GetCurrentFPS()
+    end
+    ApplySimulationRadius(SYNC_RADIUS_BOOSTED, SYNC_RADIUS_BOOSTED_MAX, true)
+    SafeSetFPS(SYNC_FPS_CAP_WHEN_ON)
+    TryFFlagFallback()
+    if syncData.connection then
+        pcall(function() syncData.connection:Disconnect() end)
+        syncData.connection = nil
+    end
+    syncData.lastUpdate = 0
+    syncData.lowFPSCount = 0
+    syncData.radiusResetCount = 0
+    syncData.connection = RunService.Heartbeat:Connect(function()
+        if not syncData.enabled then return end
+        local now = os_clock()
+        if (now - syncData.lastUpdate) < syncData.UPDATE_INTERVAL then return end
+        syncData.lastUpdate = now
+        if #Players:GetPlayers() < 2 then return end
+        SyncTick()
+        if Settings.Sync.AutoDisableOnLowFPS then
+            local fps = GetCurrentFPS()
+            if fps > 0 and fps < SYNC_LOW_FPS_THRESHOLD then
+                syncData.lowFPSCount = syncData.lowFPSCount + 1
+                if syncData.lowFPSCount >= SYNC_LOW_FPS_TICKS then
+                    syncData.lowFPSCount = 0
+                    StopSyncBooster()
+                end
+            else
+                syncData.lowFPSCount = 0
+            end
+        end
+    end)
+end
+
+local function StopSyncBooster()
+    if not syncData.enabled then return end
+    syncData.enabled = false
+    if syncData.connection then
+        pcall(function() syncData.connection:Disconnect() end)
+        syncData.connection = nil
+    end
+    syncData.lastUpdate = 0
+    syncData.lowFPSCount = 0
+    ApplySimulationRadius(SYNC_RADIUS_DEFAULT, SYNC_RADIUS_DEFAULT_MAX, true)
+    if syncData.originalFPSCap ~= nil then
+        SafeSetFPS(syncData.originalFPSCap)
+        syncData.originalFPSCap = nil
+    else
+        SafeSetFPS(SYNC_FPS_CAP_WHEN_OFF)
+    end
+end
+
+local syncCharConn = LP.CharacterAdded:Connect(function()
+    if syncData.enabled then
+        task.wait(0.5)
+        if syncData.enabled then
+            ApplySimulationRadius(SYNC_RADIUS_BOOSTED, SYNC_RADIUS_BOOSTED_MAX, true)
+        end
+    end
+end)
+
+-- ============================================================
+-- 23. ANTI-FALL DAMAGE
+-- ============================================================
+local function StartAntiFall()
+    if antiFallRunning then return end
+    antiFallRunning = true
+
+    local function setupChar(char)
+        local hum = char:WaitForChild("Humanoid", 5)
+        local hrp = char:WaitForChild("HumanoidRootPart", 5)
+        if not hum or not hrp then return end
+
+        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+
+        local stateConn = hum.StateChanged:Connect(function(_, newState)
+            if newState == Enum.HumanoidStateType.Ragdoll then
+                hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+            end
+        end)
+
+        local rayParams = RaycastParams.new()
+        rayParams.FilterType = Enum.RaycastFilterType.Exclude
+        rayParams.FilterDescendantsInstances = {char}
+
+        local startY = nil
+        local heartbeatConn = RunService.Heartbeat:Connect(function()
+            if not antiFallRunning then return end
+            local r = char:FindFirstChild("HumanoidRootPart")
+            local h = char:FindFirstChild("Humanoid")
+            if not r or not h then return end
+
+            if h.FloorMaterial ~= Enum.Material.Air then
+                startY = nil
+                return
+            end
+
+            if startY == nil then
+                startY = r.Position.Y
+            end
+
+            if startY - r.Position.Y < 6.5 then return end
+
+            local result = workspace:Raycast(r.Position, Vector3_new(0, -300, 0), rayParams)
+            if not result then return end
+
+            r.AssemblyLinearVelocity = Vector3_new(0, 0, 0)
+            startY = nil
+        end)
+
+        table_insert(antiFallCharConnections, stateConn)
+        table_insert(antiFallCharConnections, heartbeatConn)
+    end
+
+    if LP.Character then
+        setupChar(LP.Character)
+    end
+
+    antiFallConnection = LP.CharacterAdded:Connect(function(char)
+        task.wait(0.5)
+        if antiFallRunning then
+            setupChar(char)
+        end
+    end)
+end
+
+local function StopAntiFall()
+    antiFallRunning = false
+    if antiFallConnection then
+        antiFallConnection:Disconnect()
+        antiFallConnection = nil
+    end
+    for _, conn in ipairs(antiFallCharConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    antiFallCharConnections = {}
+end
+
+-- ============================================================
+-- 23.5. STRAFE HVH
+-- ============================================================
+local strafeLeftConn = nil
+local strafeRightConn = nil
+local strafeLeftEndConn = nil
+local strafeRightEndConn = nil
+
+local function StartStrafeHvH()
+    if strafeConnection then return end
+    if not LP.Character then return end
+
+    strafeLeftConn = UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
+        if input.KeyCode == Settings.Movement.StrafeKeyLeft then strafeKeyLeftHeld = true end
+        if input.KeyCode == Settings.Movement.StrafeKeyRight then strafeKeyRightHeld = true end
+    end)
+
+    strafeLeftEndConn = UserInputService.InputEnded:Connect(function(input)
+        if input.KeyCode == Settings.Movement.StrafeKeyLeft then strafeKeyLeftHeld = false end
+        if input.KeyCode == Settings.Movement.StrafeKeyRight then strafeKeyRightHeld = false end
+    end)
+
+    local lastPeek = 0
+    strafeConnection = RunService.Heartbeat:Connect(function()
+        if isScriptUnloaded or not Settings.Movement.StrafeEnabled then return end
+        local char = LP.Character
+        if not char then return end
+        local h = char:FindFirstChildOfClass("Humanoid")
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not h or not root or not root:IsA("BasePart") then return end
+
+        local now = os_clock()
+        if (now - lastPeek) < Settings.Movement.PeekCooldown then return end
+
+        local strafeDir = 0
+        if strafeKeyLeftHeld then strafeDir = -1 end
+        if strafeKeyRightHeld then strafeDir = 1 end
+
+        if strafeDir ~= 0 then
+            local cam = GetCamera()
+            local camRight = cam.CFrame.RightVector
+            local offset = camRight * (strafeDir * Settings.Movement.StrafeDistance)
+            local newPos = root.Position + offset
+            if h.FloorMaterial == Enum.Material.Air or h.MoveDirection.Magnitude < 0.1 then
+                pcall(function()
+                    root.CFrame = CFrame_new(newPos, newPos + cam.CFrame.LookVector)
+                end)
+                lastPeek = now
+            end
+        end
+    end)
+end
+
+local function StopStrafeHvH()
+    if strafeConnection then
+        pcall(function() strafeConnection:Disconnect() end)
+        strafeConnection = nil
+    end
+    if strafeLeftConn then pcall(function() strafeLeftConn:Disconnect() end); strafeLeftConn = nil end
+    if strafeRightConn then pcall(function() strafeRightConn:Disconnect() end); strafeRightConn = nil end
+    if strafeLeftEndConn then pcall(function() strafeLeftEndConn:Disconnect() end); strafeLeftEndConn = nil end
+    if strafeRightEndConn then pcall(function() strafeRightEndConn:Disconnect() end); strafeRightEndConn = nil end
+end
+
+-- ============================================================
+-- 23.6. SPINBOT
+-- ============================================================
+local function StartSpinbot()
+    if spinbotConnection then return end
+    local lastSpin = os_clock()
+    spinbotConnection = RunService.Heartbeat:Connect(function()
+        if isScriptUnloaded or not Settings.Movement.Spinbot then return end
+        local char = LP.Character
+        if not char then return end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not root or not root:IsA("BasePart") then return end
+
+        local now = os_clock()
+        local dt = now - lastSpin
+        lastSpin = now
+        if dt > 0.5 then dt = 0.5 end
+
+        spinbotAngle = spinbotAngle + math.rad(Settings.Movement.SpinbotSpeed) * dt
+        if spinbotAngle > math.pi * 2 then
+            spinbotAngle = spinbotAngle - math.pi * 2
+        end
+
+        pcall(function()
+            root.CFrame = CFrame_new(root.Position) * CFrame.Angles(0, spinbotAngle, 0)
+        end)
+    end)
+end
+
+local function StopSpinbot()
+    if spinbotConnection then
+        pcall(function() spinbotConnection:Disconnect() end)
+        spinbotConnection = nil
+    end
+end
+
+-- ============================================================
+-- 24. WEAPON EDITOR
+-- ============================================================
+local WEAPON_PARAMS = {
+    "AimFov", "AimScatterMultiplier", "AimSpeed", "AimSway",
+    "BulletSpeed", "BulletSpeedMin", "BulletTrailTransparency",
+    "BulletTransparency", "Projectiles",
+    "Damage", "DamageMin", "HeadMultiplier", "LegMultiplier",
+    "TorsoMultiplier", "SuppressionMult",
+    "GunRecoil", "GunRecoilX", "ShootThrust",
+    "ReloadSpeed", "ReloadSpeed2",
+    "EquipSpeed", "scatter", "waittime", "ZoomMult",
+}
+
+local function FindAllMods(folder)
+    local found = {}
+    local function recurse(parent)
+        if not parent then return end
+        for _, child in ipairs(parent:GetChildren()) do
+            if child:FindFirstChild("Stats") then
+                table_insert(found, child)
+            end
+            if child:IsA("Folder") or child:IsA("Tool") or child:IsA("Model")
+                or child:IsA("Part") or child:IsA("BasePart") then
+                pcall(recurse, child)
+            end
+        end
+    end
+    pcall(recurse, folder)
+    return found
+end
+
+local function GetAllWeapons()
+    local allWeapons = {}
+    local bp = LP:FindFirstChild("Backpack")
+    if bp then
+        for _, i in ipairs(bp:GetChildren()) do
+            if i:IsA("Tool") then table_insert(allWeapons, i) end
+        end
+    end
+    local char = LP.Character
+    if char then
+        for _, i in ipairs(char:GetChildren()) do
+            if i:IsA("Tool") and not table.find(allWeapons, i) then
+                table_insert(allWeapons, i)
+            end
+        end
+    end
+    return allWeapons
+end
+
+local function ApplyWeaponMod(weapon, paramName, value)
+    if not weapon or not weapon:IsDescendantOf(game) then return false end
+    local af = weapon:FindFirstChild("AttachmentFolder")
+    if not af then return false end
+    local mods = FindAllMods(af)
+    local applied = false
+    for _, mod in ipairs(mods) do
+        local statFolder = mod:FindFirstChild("Stats")
+        if statFolder then
+            local stat = statFolder:FindFirstChild(paramName)
+            if stat and stat:IsA("NumberValue") then
+                if not weaponOriginalValues[weapon] then
+                    weaponOriginalValues[weapon] = {}
+                end
+                if not weaponOriginalValues[weapon][paramName] then
+                    weaponOriginalValues[weapon][paramName] = stat.Value
+                end
+                stat.Value = value
+                applied = true
+            end
+        end
+    end
+    return applied
+end
+
+local function RestoreAllWeaponMods()
+    for weapon, params in pairs(weaponOriginalValues) do
+        if weapon and weapon:IsDescendantOf(game) then
+            for paramName, originalValue in pairs(params) do
+                ApplyWeaponMod(weapon, paramName, originalValue)
+            end
+        end
+    end
+    weaponOriginalValues = {}
+end
+
+-- ============================================================
+-- 25. UI
+-- ============================================================
+local Window = ScryuxUI:CreateWindow({
+    Title = "Town Complete v9.5.8",
+    Size = UDim2.new(0, 680, 0, 580),
+    Keybind = Enum.KeyCode.RightShift,
+    Theme = "Default",
+    Acrylic = false,
+    SaveFolder = "TownComplete_Settings/" .. tostring(game.PlaceId),
+    FloatingIcon = true,
+})
+
+_env.TownUI_Window = Window
+
+local ESPTab = Window:CreateTab("ESP")
+ESPTab:CreateLabel("Keybind: RightShift = Menu | End = Panic | Y = Helper")
+ESPTab:CreateLabel("Version: v9.5.8")
+
+local ESPMain = ESPTab:CreateSection("ESP")
+ESPMain:CreateToggle({
+    Text = "ESP Master", Default = true, Index = "ESP_Enabled",
+    Callback = function(v) Settings.ESP.Enabled = v end
+})
+ESPMain:CreateToggle({
+    Text = "Box", Default = true, Index = "ESP_Box",
+    Callback = function(v)
+        Settings.ESP.Box = v
+        if not v then
+            for _, esp in pairs(ESPPool) do esp.box.Visible = false end
+        end
+    end
+})
+ESPMain:CreateSlider({
+    Text = "Box Thickness", Min = 1, Max = 5, Default = 1, Index = "ESP_BoxThickness",
+    Callback = function(v)
+        Settings.ESP.BoxThickness = v
+        for _, esp in pairs(ESPPool) do esp.box.Thickness = v end
+    end
+})
+ESPMain:CreateSlider({
+    Text = "Box Padding", Min = 0, Max = 3, Default = 0.5, Index = "ESP_BoxPadding",
+    Callback = function(v) Settings.ESP.BoxPadding = v end
+})
+
+local ESPInfo = ESPTab:CreateSection("Info")
+ESPInfo:CreateToggle({
+    Text = "Health Bar", Default = true, Index = "ESP_Health",
+    Callback = function(v)
+        Settings.ESP.ShowHealth = v
+        if not v then
+            for _, esp in pairs(ESPPool) do esp.health.Visible = false end
+        end
+    end
+})
+ESPInfo:CreateToggle({
+    Text = "Names", Default = true, Index = "ESP_Names",
+    Callback = function(v)
+        Settings.ESP.ShowName = v
+        if not v then
+            for _, esp in pairs(ESPPool) do esp.name.Visible = false end
+        end
+    end
+})
+ESPInfo:CreateToggle({
+    Text = "Show Distance", Default = false, Index = "ESP_Distance",
+    Callback = function(v) Settings.ESP.ShowDistance = v end
+})
+
+local ESPChams = ESPTab:CreateSection("Chams")
+ESPChams:CreateToggle({
+    Text = "Chams", Default = true, Index = "ESP_Chams",
+    Callback = function(v)
+        Settings.ESP.Chams = v
+        if not v then
+            for _, esp in pairs(ESPPool) do esp.chams.Enabled = false end
+        end
+    end
+})
+ESPChams:CreateSlider({
+    Text = "Chams Fill Transparency", Min = 0, Max = 1, Default = 0.25, Index = "ESP_ChamsFill",
+    Callback = function(v) Settings.ESP.ChamsFillTransparency = v end
+})
+ESPChams:CreateSlider({
+    Text = "Chams Outline Transparency", Min = 0, Max = 1, Default = 0, Index = "ESP_ChamsOutlineTransp",
+    Callback = function(v) Settings.ESP.ChamsOutlineTransparency = v end
+})
+ESPChams:CreateDropdown({
+    Text = "Chams Material",
+    Options = {"ForceField", "Neon", "Glass", "Plastic", "SmoothPlastic", "Metal", "Wood", "Marble", "Granite", "Slate", "Concrete", "Brick", "Cobblestone", "Ice", "Sand", "Fabric", "Foil", "DiamondPlate", "CorrodedMetal", "Grass", "LeafyGrass", "Rock", "Snow", "Mud", "Asphalt", "Pebble", "Salt", "Limestone", "Pavement"},
+    Default = "ForceField",
+    Index = "ESP_ChamsMaterial",
+    Callback = function(v) Settings.ESP.ChamsMaterial = v end
+})
+ESPChams:CreateDropdown({
+    Text = "Chams Depth Mode",
+    Options = {"AlwaysOnTop", "Occluded"},
+    Default = "AlwaysOnTop",
+    Index = "ESP_ChamsDepth",
+    Callback = function(v) Settings.ESP.ChamsDepthMode = v end
+})
+ESPChams:CreateColorpicker({
+    Text = "Chams Outline Color",
+    Default = Color3.new(1, 1, 1),
+    Index = "ESP_ChamsOutlineColor",
+    Callback = function(c) Settings.ESP.ChamsOutlineColor = c end
+})
+ESPChams:CreateToggle({
+    Text = "Wallcheck Chams ESP",
+    Default = false,
+    Index = "ESP_WallcheckChams",
+    Callback = function(v) Settings.ESP.WallcheckChams = v end
+})
+ESPChams:CreateLabel("ON = solo outline si está tapado por pared")
+ESPChams:CreateLabel("OFF = chams atraviesa paredes")
+
+local SkeletonTab = Window:CreateTab("Skeleton")
+local SkelMain = SkeletonTab:CreateSection("Skeleton ESP")
+SkelMain:CreateToggle({
+    Text = "Skeleton Master", Default = true, Index = "Skel_Enabled",
+    Callback = function(v)
+        Settings.Skeleton.Enabled = v
+        if not v then ClearAllSkeletons() end
+    end
+})
+SkelMain:CreateSlider({
+    Text = "Thickness", Min = 1, Max = 5, Default = 1, Index = "Skel_Thickness",
+    Callback = function(v)
+        Settings.Skeleton.Thickness = v
+        for _, data in pairs(ActiveSkeletons) do
+            for _, line in ipairs(data.lines) do line.Thickness = v end
+        end
+    end
+})
+SkelMain:CreateSlider({
+    Text = "Max Distance", Min = 50, Max = 2000, Default = 500, Index = "Skel_MaxDist",
+    Callback = function(v) Settings.Skeleton.MaxDistance = v end
+})
+SkelMain:CreateDropdown({
+    Text = "Rig Mode", Options = {"Auto", "R6", "R15", "Both"}, Default = "Auto", Index = "Skel_RigMode",
+    Callback = function(v)
+        Settings.Skeleton.RigMode = v
+        ClearAllSkeletons()
+    end
+})
+SkelMain:CreateToggle({
+    Text = "Only Visible",
+    Default = false,
+    Index = "Skel_OnlyVisible",
+    Callback = function(v) Settings.Skeleton.OnlyVisible = v end
+})
+
+local AimbotTab = Window:CreateTab("Aimbot")
+local ASet = AimbotTab:CreateSection("Aimbot")
+ASet:CreateLabel("Keybind: RightShift (abrir) | Y (helper)")
+ASet:CreateToggle({ Text = "Aimbot Master", Default = false, Index = "Aim_Enabled",
+    Callback = function(v) Settings.Aimbot.Enabled = v end })
+ASet:CreateDropdown({ Text = "Method", Options = {"Camera","Mouse"}, Default = "Camera", Index = "Aim_Method",
+    Callback = function(v) Settings.Aimbot.Method = v end })
+ASet:CreateDropdown({ Text = "Priority", Options = {"Distance","FOV"}, Default = "Distance", Index = "Aim_Priority",
+    Callback = function(v) Settings.Aimbot.Priority = v end })
+ASet:CreateToggle({ Text = "Wall Check", Default = false, Index = "Aim_WallCheck",
+    Callback = function(v) Settings.Aimbot.WallCheck = v end })
+ASet:CreateToggle({ Text = "Strict Walls", Default = false, Index = "Aim_StrictWalls",
+    Callback = function(v) Settings.Aimbot.StrictWallCheck = v end })
+ASet:CreateToggle({ Text = "Team Check", Default = false, Index = "Aim_TeamCheck",
+    Callback = function(v) Settings.Aimbot.TeamCheck = v end })
+ASet:CreateToggle({ Text = "Ignore Passive", Default = true, Index = "Aim_IgnorePassive",
+    Callback = function(v) Settings.Aimbot.IgnorePassive = v end })
+ASet:CreateSlider({ Text = "Max Distance", Min = 50, Max = 2000, Default = 500, Index = "Aim_MaxDist",
+    Callback = function(v) Settings.Aimbot.MaxDistance = v end })
+ASet:CreateDropdown({ Text = "Aim Key Type", Options = {"Mouse","Key"}, Default = "Mouse", Index = "Aim_KeyType",
+    Callback = function(v) Settings.Aimbot.AimKeyType = v end })
+ASet:CreateDropdown({ Text = "Aim Key", Options = {"T","Q","E","R","F","G","Z","X","C","V"}, Default = "T", Index = "Aim_Key",
+    Callback = function(v) if Enum.KeyCode[v] then Settings.Aimbot.AimKey = Enum.KeyCode[v] end end })
+ASet:CreateDropdown({ Text = "Mouse Button", Options = {"Left","Right","Middle"}, Default = "Right", Index = "Aim_MouseBtn",
+    Callback = function(v)
+        if v == "Left" then Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton1
+        elseif v == "Right" then Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton2
+        else Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton3 end
+    end })
+ASet:CreateSlider({ Text = "FOV", Min = 1, Max = 360, Default = 180, Index = "Aim_FOV",
+    Callback = function(v) Settings.Aimbot.FOV = v end })
+ASet:CreateToggle({ Text = "Show FOV Circle", Default = false, Index = "Aim_ShowFOV",
+    Callback = function(v) Settings.Aimbot.ShowFOV = v end })
+ASet:CreateSlider({ Text = "Smoothness Base", Min = 0, Max = 100, Default = 15, Index = "Aim_SmoothBase",
+    Callback = function(v) Settings.Aimbot.BaseSmoothness = v / 100 end })
+ASet:CreateSlider({ Text = "Smoothness Helper", Min = 0, Max = 100, Default = 15, Index = "Aim_SmoothHelper",
+    Callback = function(v) Settings.Aimbot.HelperSmoothness = v / 100 end })
+ASet:CreateToggle({ Text = "Prediction", Default = false, Index = "Aim_Prediction",
+    Callback = function(v) Settings.Aimbot.UsePrediction = v end })
+ASet:CreateSlider({ Text = "Prediction Amount", Min = 0.01, Max = 0.3, Default = 0.13, Index = "Aim_PredAmount",
+    Callback = function(v) Settings.Aimbot.PredictionAmount = v end })
+ASet:CreateToggle({ Text = "Anti-360", Default = false, Index = "Aim_Anti360",
+    Callback = function(v) Settings.Aimbot.Anti360.Enabled = v end })
+ASet:CreateToggle({
+    Text = "Sticky Target Lock",
+    Default = false,
+    Index = "Aim_StickyLock",
+    Callback = function(v) Settings.Aimbot.StickyLock = v end
+})
+ASet:CreateSlider({
+    Text = "Sticky Timeout (s)",
+    Min = 0.5, Max = 10, Default = 2,
+    Index = "Aim_StickyTimeout",
+    Callback = function(v) Settings.Aimbot.StickyTimeout = v end
+})
+ASet:CreateLabel("Sticky Lock: mantiene el target hasta que muera")
+
+ASet:CreateDropdown({
+    Text = "Aim Part Lock",
+    Options = BODY_PARTS_ALL,
+    Default = "Auto (Nearest to Crosshair)",
+    Index = "Aim_AimPartMode",
+    Callback = function(v)
+        Settings.Aimbot.AimPartMode = v
+        targetTransition.previousPlayer = nil
+    end
+})
+ASet:CreateLabel("Auto: apunta a lo más cercano al crosshair")
+ASet:CreateLabel("Elige una parte fija para lock")
+
+local WLSet = AimbotTab:CreateSection("Whitelist")
+WLSet:CreateButton("Toggle Whitelist (current target)", function()
+    local t = TargetManager:GetCurrentTarget()
+    if t then
+        TargetManager:AddToWhitelist(t.player)
+        local state = TargetManager:IsWhitelisted(t.player) and "añadido" or "removido"
+        Window:Notify("Whitelist", t.player.Name .. " " .. state, 2, "Info")
+    else
+        Window:Notify("Whitelist", "Sin target actual", 2, "Warning")
+    end
+end)
+
+-- ============================================================
+-- AIM ASSIST TAB
+-- ============================================================
+local AimAssistTab = Window:CreateTab("Aim Assist")
+local AASet = AimAssistTab:CreateSection("Aim Assist")
+
+AASet:CreateToggle({
+    Text = "Aim Assist Master",
+    Default = false,
+    Index = "AA_Enabled",
+    Callback = function(v)
+        Settings.AimAssist.Enabled = v
+        if v then StartAimAssist() else StopAimAssist() end
+    end
+})
+
+AASet:CreateSlider({
+    Text = "FOV", Min = 1, Max = 360, Default = 30,
+    Index = "AA_FOV",
+    Callback = function(v) Settings.AimAssist.FOV = v end
+})
+
+AASet:CreateToggle({
+    Text = "Show FOV Circle",
+    Default = false,
+    Index = "AA_ShowFOV",
+    Callback = function(v) Settings.AimAssist.ShowFOV = v end
+})
+
+AASet:CreateColorpicker({
+    Text = "FOV Color",
+    Default = Color3.fromRGB(0, 255, 255),
+    Index = "AA_FOVColor",
+    Callback = function(c) Settings.AimAssist.FOVColor = c end
+})
+
+AASet:CreateSlider({
+    Text = "FOV Thickness", Min = 1, Max = 5, Default = 1,
+    Index = "AA_FOVThickness",
+    Callback = function(v) Settings.AimAssist.FOVThickness = v end
+})
+
+AASet:CreateSlider({
+    Text = "Max Distance", Min = 50, Max = 2000, Default = 500,
+    Index = "AA_MaxDist",
+    Callback = function(v) Settings.AimAssist.MaxDistance = v end
+})
+
+AASet:CreateSlider({
+    Text = "Smoothness", Min = 0, Max = 100, Default = 30,
+    Index = "AA_Smoothness",
+    Callback = function(v) Settings.AimAssist.Smoothness = v / 100 end
+})
+
+AASet:CreateDropdown({
+    Text = "Aim Part",
+    Options = BODY_PARTS_ALL,
+    Default = "Head",
+    Index = "AA_AimPart",
+    Callback = function(v) Settings.AimAssist.AimPart = v end
+})
+
+AASet:CreateDropdown({
+    Text = "Priority",
+    Options = {"Distance", "FOV"},
+    Default = "Distance",
+    Index = "AA_Priority",
+    Callback = function(v) Settings.AimAssist.Priority = v end
+})
+
+AASet:CreateDropdown({
+    Text = "Method",
+    Options = {"Camera", "Mouse"},
+    Default = "Camera",
+    Index = "AA_Method",
+    Callback = function(v) Settings.AimAssist.UseMouse = (v == "Mouse") end
+})
+
+AASet:CreateToggle({
+    Text = "Team Check", Default = false,
+    Index = "AA_TeamCheck",
+    Callback = function(v) Settings.AimAssist.TeamCheck = v end
+})
+
+AASet:CreateToggle({
+    Text = "Ignore Passive", Default = true,
+    Index = "AA_IgnorePassive",
+    Callback = function(v) Settings.AimAssist.IgnorePassive = v end
+})
+
+AASet:CreateToggle({
+    Text = "Wall Check", Default = false,
+    Index = "AA_WallCheck",
+    Callback = function(v) Settings.AimAssist.WallCheck = v end
+})
+
+AASet:CreateToggle({
+    Text = "Require Visible", Default = true,
+    Index = "AA_Visible",
+    Callback = function(v) Settings.AimAssist.Visible = v end
+})
+
+AASet:CreateToggle({
+    Text = "Use Prediction", Default = false,
+    Index = "AA_Prediction",
+    Callback = function(v) Settings.AimAssist.UsePrediction = v end
+})
+
+AASet:CreateSlider({
+    Text = "Prediction Amount", Min = 0.01, Max = 0.3, Default = 0.13,
+    Index = "AA_PredAmount",
+    Callback = function(v) Settings.AimAssist.PredictionAmount = v end
+})
+
+AASet:CreateLabel("Aim Assist = Silent Aim renombrado")
+AASet:CreateLabel("Se activa automáticamente cuando esté ON")
+
+local WeaponTab = Window:CreateTab("Weapon Mods")
+local WS = WeaponTab:CreateSection("Weapon")
+WS:CreateToggle({ Text = "No Recoil", Default = false, Index = "W_NoRecoil",
+    Callback = function(v)
+        Settings.WeaponMods.NoRecoil = v
+        if v then StartNoRecoil() else StopNoRecoil() end
+    end })
+WS:CreateToggle({ Text = "No Spread", Default = false, Index = "W_NoSpread",
+    Callback = function(v)
+        Settings.WeaponMods.NoSpread = v
+        if v then StartNoSpread() else StopNoSpread() end
+    end })
+WS:CreateToggle({ Text = "No Sway", Default = false, Index = "W_NoSway",
+    Callback = function(v)
+        Settings.WeaponMods.NoSway = v
+        if v then StartNoSway() else StopNoSway() end
+    end })
+
+local WETab = Window:CreateTab("Weapon Editor")
+local WESection = WETab:CreateSection("Weapon Editor")
+
+weaponEditorCountLabel = WESection:CreateLabel("Armas detectadas: 0")
+
+WESection:CreateButton("Refresh Weapons", function()
+    weaponEditorCache = GetAllWeapons()
+    local names = {}
+    for _, w in ipairs(weaponEditorCache) do
+        if w:IsDescendantOf(game) then table_insert(names, w.Name) end
+    end
+    if #names == 0 then names = {"(ninguna)"} end
+    weaponEditorCountLabel:Set("Armas detectadas: " .. #names)
+    if weaponEditorDynamicDropdown and weaponEditorDynamicDropdown.SetOptions then
+        pcall(function() weaponEditorDynamicDropdown:SetOptions(names) end)
+    end
+    Window:Notify("Weapons", "Encontradas: " .. #names, 2, "Success")
+end)
+
+weaponEditorDynamicDropdown = WESection:CreateDropdown({
+    Text = "Weapon",
+    Options = {"Refresh first..."},
+    Default = "Refresh first...",
+    Index = "WE_Weapon",
+    Callback = function(v) Settings.WeaponEditor.SelectedWeapon = v end
+})
+
+WESection:CreateDropdown({
+    Text = "Parameter",
+    Options = WEAPON_PARAMS,
+    Default = "Damage",
+    Index = "WE_Param",
+    Callback = function(v) Settings.WeaponEditor.SelectedParam = v end
+})
+
+WESection:CreateSlider({
+    Text = "Value",
+    Min = 0, Max = 1000, Default = 100,
+    Index = "WE_Value",
+    Callback = function(v) Settings.WeaponEditor.CustomValue = v end
+})
+
+WESection:CreateButton("Apply to Selected", function()
+    local sel = Settings.WeaponEditor.SelectedWeapon
+    if not sel or sel == "Refresh first..." or sel == "(ninguna)" then
+        Window:Notify("Weapon Editor", "Selecciona un arma primero", 2, "Warning")
+        return
+    end
+    for _, weapon in ipairs(weaponEditorCache) do
+        if weapon.Name == sel and weapon:IsDescendantOf(game) then
+            local ok2 = ApplyWeaponMod(weapon, Settings.WeaponEditor.SelectedParam, Settings.WeaponEditor.CustomValue)
+            if ok2 then
+                Window:Notify("Weapon Editor",
+                    weapon.Name .. "." .. Settings.WeaponEditor.SelectedParam .. " = " .. Settings.WeaponEditor.CustomValue,
+                    3, "Success")
+            else
+                Window:Notify("Weapon Editor", "Parámetro no encontrado", 2, "Error")
+            end
+            return
+        end
+    end
+    Window:Notify("Weapon Editor", "Arma no encontrada", 2, "Error")
+end)
+
+WESection:CreateButton("Apply to All Weapons", function()
+    weaponEditorCache = GetAllWeapons()
+    local count, applied = 0, 0
+    for _, weapon in ipairs(weaponEditorCache) do
+        if weapon:IsDescendantOf(game) then
+            count = count + 1
+            if ApplyWeaponMod(weapon, Settings.WeaponEditor.SelectedParam, Settings.WeaponEditor.CustomValue) then
+                applied = applied + 1
+            end
+        end
+    end
+    Window:Notify("Weapon Editor", "Aplicado a " .. applied .. "/" .. count .. " armas", 3, "Success")
+end)
+
+WESection:CreateButton("Restore All", function()
+    RestoreAllWeaponMods()
+    Window:Notify("Weapon Editor", "Valores restaurados", 2, "Info")
+end)
+
+local VisualsTab = Window:CreateTab("Visuals")
+local VLight = VisualsTab:CreateSection("Lighting")
+VLight:CreateToggle({ Text = "Full Bright", Default = false, Index = "Vis_FullBright",
+    Callback = function(v) setFullBright(v) end })
+VLight:CreateToggle({ Text = "X-Ray", Default = false, Index = "Vis_XRay",
+    Callback = function(v)
+        Settings.Visuals.XRay = v
+        if v then StartXRay() else StopXRay() end
+    end })
+VLight:CreateToggle({ Text = "No Fog", Default = false, Index = "Vis_NoFog",
+    Callback = function(v) setNoFog(v) end })
+VLight:CreateToggle({ Text = "No Bloom", Default = false, Index = "Vis_NoBloom",
+    Callback = function(v) setNoBloom(v) end })
+VLight:CreateToggle({ Text = "No SunRays", Default = false, Index = "Vis_NoSunRays",
+    Callback = function(v) setNoSunRays(v) end })
+
+local VFOV = VisualsTab:CreateSection("Camera")
+VFOV:CreateToggle({
+    Text = "Custom FOV",
+    Default = false,
+    Index = "Vis_CustomFOV",
+    Callback = function(v)
+        setCustomFOV(v, Settings.Visuals.FOVValue)
+    end
+})
+VFOV:CreateSlider({
+    Text = "FOV Value",
+    Min = 1, Max = 120, Default = 70,
+    Index = "Vis_FOVValue",
+    Callback = function(v)
+        Settings.Visuals.FOVValue = v
+        if Settings.Visuals.CustomFOV then
+            setCustomFOV(true, v)
+        end
+    end
+})
+
+local VHide = VisualsTab:CreateSection("First Person")
+VHide:CreateToggle({
+    Text = "Hide Body in First Person",
+    Default = false,
+    Index = "Vis_HideBody",
+    Callback = function(v) Settings.Visuals.HideBody = v end
+})
+VHide:CreateToggle({
+    Text = "Also Hide Hands/Arms",
+    Default = false,
+    Index = "Vis_HideHands",
+    Callback = function(v) Settings.Visuals.HideHands = v end
+})
+VHide:CreateToggle({
+    Text = "Also Hide Equipped Tool",
+    Default = false,
+    Index = "Vis_HideTool",
+    Callback = function(v) Settings.Visuals.HideTool = v end
+})
+
+local VTracer = VisualsTab:CreateSection("Bullet Tracers")
+VTracer:CreateToggle({
+    Text = "Bullet Tracers",
+    Default = false,
+    Index = "Vis_BulletTracers",
+    Callback = function(v) Settings.Visuals.BulletTracers = v end
+})
+VTracer:CreateColorpicker({
+    Text = "Tracer Color",
+    Default = Color3.fromRGB(255, 50, 50),
+    Index = "Vis_TracerColor",
+    Callback = function(c) Settings.Visuals.TracerColor = c end
+})
+VTracer:CreateSlider({
+    Text = "Lifetime (s)",
+    Min = 0.1, Max = 10, Default = 2,
+    Index = "Vis_TracerLifetime",
+    Callback = function(v) Settings.Visuals.TracerLifetime = v end
+})
+VTracer:CreateSlider({
+    Text = "Thickness",
+    Min = 1, Max = 10, Default = 2,
+    Index = "Vis_TracerThickness",
+    Callback = function(v) Settings.Visuals.TracerThickness = v end
+})
+VTracer:CreateSlider({
+    Text = "Max Distance",
+    Min = 50, Max = 2000, Default = 500,
+    Index = "Vis_TracerMaxDist",
+    Callback = function(v) Settings.Visuals.TracerMaxDistance = v end
+})
+VTracer:CreateLabel("Los tracers se crean al llamar CreateTracer()")
+
+local AntiFallTab = Window:CreateTab("Anti-Fall")
+local AFSection = AntiFallTab:CreateSection("Anti-Fall Damage")
+AFSection:CreateToggle({
+    Text = "Disable Fall Damage", Default = false, Index = "AF_Enabled",
+    Callback = function(v)
+        Settings.AntiFall.Enabled = v
+        if v then
+            StartAntiFall()
+            Window:Notify("Anti-Fall", "Activado", 2, "Success")
+        else
+            StopAntiFall()
+            Window:Notify("Anti-Fall", "Desactivado", 2, "Info")
+        end
+    end
+})
+AFSection:CreateLabel("Previene ragdoll al caer")
+AFSection:CreateLabel("Resetea velocidad en caídas >6.5 studs")
+
+local MovementTab = Window:CreateTab("Movement")
+local MSet = MovementTab:CreateSection("Strafe HvH")
+MSet:CreateToggle({
+    Text = "Strafe HvH (Window Peek)",
+    Default = false,
+    Index = "Mov_Strafe",
+    Callback = function(v)
+        Settings.Movement.StrafeEnabled = v
+        if v then StartStrafeHvH() else StopStrafeHvH() end
+    end
+})
+MSet:CreateSlider({
+    Text = "Strafe Distance",
+    Min = 0.1, Max = 2, Default = 0.3,
+    Index = "Mov_StrafeDist",
+    Callback = function(v) Settings.Movement.StrafeDistance = v end
+})
+MSet:CreateSlider({
+    Text = "Peek Cooldown (s)",
+    Min = 0.02, Max = 0.5, Default = 0.08,
+    Index = "Mov_PeekCooldown",
+    Callback = function(v) Settings.Movement.PeekCooldown = v end
+})
+MSet:CreateDropdown({
+    Text = "Strafe Key Left",
+    Options = {"A", "Q", "Z", "X"},
+    Default = "A",
+    Index = "Mov_KeyLeft",
+    Callback = function(v) if Enum.KeyCode[v] then Settings.Movement.StrafeKeyLeft = Enum.KeyCode[v] end end
+})
+MSet:CreateDropdown({
+    Text = "Strafe Key Right",
+    Options = {"D", "E", "C", "V"},
+    Default = "D",
+    Index = "Mov_KeyRight",
+    Callback = function(v) if Enum.KeyCode[v] then Settings.Movement.StrafeKeyRight = Enum.KeyCode[v] end end
+})
+MSet:CreateLabel("Presiona A o D mientras el toggle está activo")
+
+local SpinSection = MovementTab:CreateSection("Spinbot")
+SpinSection:CreateToggle({
+    Text = "Spinbot",
+    Default = false,
+    Index = "Mov_Spinbot",
+    Callback = function(v)
+        Settings.Movement.Spinbot = v
+        if v then StartSpinbot() else StopSpinbot() end
+    end
+})
+SpinSection:CreateSlider({
+    Text = "Spin Speed (deg/s)",
+    Min = 60, Max = 1440, Default = 360,
+    Index = "Mov_SpinSpeed",
+    Callback = function(v) Settings.Movement.SpinbotSpeed = v end
+})
+SpinSection:CreateLabel("Solo visual - el servidor no te ve girar")
+
+local UtilityTab = Window:CreateTab("Utility")
+local USync = UtilityTab:CreateSection("Sync Booster + FPS Helper")
+USync:CreateToggle({
+    Text = "Sync Booster (Sync + FPS)", Default = false, Index = "Sync_Enabled",
+    Callback = function(v)
+        Settings.Sync.Enabled = v
+        if v then StartSyncBooster() else StopSyncBooster() end
+    end
+})
+USync:CreateToggle({
+    Text = "Auto-disable on low FPS (<30)", Default = false, Index = "Sync_AutoDisable",
+    Callback = function(v) Settings.Sync.AutoDisableOnLowFPS = v end
+})
+USync:CreateToggle({
+    Text = "Try FFlag fallback (one-shot)", Default = false, Index = "Sync_FFlagFallback",
+    Callback = function(v) Settings.Sync.TryFFlagFallback = v end
+})
+
+local UHUD = UtilityTab:CreateSection("HUD")
+UHUD:CreateToggle({
+    Text = "HUD (FPS / Ping)", Default = true, Index = "HUD_Enabled",
+    Callback = function(v)
+        Settings.HUD.Enabled = v
+        if not v then HudLabel.Visible = false end
+    end
+})
+UHUD:CreateToggle({ Text = "Show FPS", Default = true, Index = "HUD_ShowFPS",
+    Callback = function(v) Settings.HUD.ShowFPS = v end })
+UHUD:CreateToggle({ Text = "Show Ping", Default = true, Index = "HUD_ShowPing",
+    Callback = function(v) Settings.HUD.ShowPing = v end })
+UHUD:CreateDropdown({
+    Text = "HUD Position",
+    Options = {"TopRight", "TopLeft", "BottomRight", "BottomLeft"},
+    Default = "TopRight",
+    Index = "HUD_Position",
+    Callback = function(v) Settings.HUD.Position = v end
+})
+
+local UPerf = UtilityTab:CreateSection("Performance")
+UPerf:CreateSlider({
+    Text = "ESP Update Rate (s)", Min = 0.01, Max = 0.2, Default = 0.03, Index = "Perf_ESPRate",
+    Callback = function(v) Settings.Performance.ESPUpdateRate = v end
+})
+UPerf:CreateSlider({
+    Text = "Skeleton Update Rate (s)", Min = 0.01, Max = 0.2, Default = 0.05, Index = "Perf_SkelRate",
+    Callback = function(v) Settings.Performance.SkeletonUpdateRate = v end
+})
+
+local UConfig = UtilityTab:CreateSection("Config")
+UConfig:CreateButton("Guardar", function()
+    if Window.GetSaveManager then
+        local sm = Window:GetSaveManager()
+        sm:Save("default")
+        Window:Notify("Config", "Guardado", 2, "Success")
+    end
+end)
+UConfig:CreateButton("Cargar", function()
+    if Window.GetSaveManager then
+        local sm = Window:GetSaveManager()
+        sm:Load("default")
+        Window:Notify("Config", "Cargado", 2, "Success")
+    end
+end)
+
+local UScript = UtilityTab:CreateSection("Script")
+UScript:CreateButton("Unload", function()
+    _env.TownComplete_Cleanup()
+    if Window.Destroy then Window:Destroy() end
+end)
+UScript:CreateLabel("Panic key: End (desactiva todo)")
+
+-- ============================================================
+-- 26. PANIC KEY (End)
+-- ============================================================
+local panicConn = UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.End then
+        Settings.ESP.Enabled = false
+        Settings.Skeleton.Enabled = false
+        Settings.Aimbot.Enabled = false
+        Settings.AimAssist.Enabled = false
+        Settings.Sync.Enabled = false
+        Settings.HUD.Enabled = false
+        Settings.AntiFall.Enabled = false
+        Settings.Visuals.XRay = false
+        Settings.Visuals.CustomFOV = false
+        Settings.Visuals.HideBody = false
+        Settings.Visuals.HideHands = false
+        Settings.Visuals.HideTool = false
+        Settings.Visuals.BulletTracers = false
+        Settings.Movement.StrafeEnabled = false
+        Settings.Movement.Spinbot = false
+        Settings.Aimbot.StickyLock = false
+        ClearAllESP()
+        ClearAllSkeletons()
+        StopSyncBooster()
+        StopAntiFall()
+        StopNoRecoil()
+        StopNoSpread()
+        StopNoSway()
+        StopStrafeHvH()
+        StopSpinbot()
+        StopHideBody()
+        StopAimAssist()
+        StopTracerLoop()
+        ClearAllTracers()
+        setFullBright(false)
+        setNoFog(false)
+        setNoBloom(false)
+        setNoSunRays(false)
+        setCustomFOV(false)
+        StopXRay()
+        if HudLabel then HudLabel.Visible = false end
+        if _env.TownUI_Window then
+            pcall(function()
+                _env.TownUI_Window:Notify("Panic", "Todo desactivado (End)", 3, "Warning")
+            end)
+        end
+    end
+end)
+
+-- ============================================================
+-- 27. CLEANUP
+-- ============================================================
+_env.TownComplete_Cleanup = function()
+    isScriptUnloaded = true
+
+    pcall(function() espConn:Disconnect() end)
+    pcall(function() skeletonConn:Disconnect() end)
+    pcall(function() fpsCounterConn:Disconnect() end)
+    pcall(function() pingUpdateConn:Disconnect() end)
+    pcall(function() hudConn:Disconnect() end)
+    pcall(function() playerAddedConn:Disconnect() end)
+    pcall(function() playerRemovingConn:Disconnect() end)
+    pcall(function() localCharConn:Disconnect() end)
+    pcall(function() localDiedConn:Disconnect() end)
+    pcall(function() aimbotConn:Disconnect() end)
+    pcall(function() fovConn:Disconnect() end)
+    pcall(function() targetIndicatorConn:Disconnect() end)
+    pcall(function() aimKeyBeganConn:Disconnect() end)
+    pcall(function() aimKeyEndedConn:Disconnect() end)
+    pcall(function() syncCharConn:Disconnect() end)
+    pcall(function() panicConn:Disconnect() end)
+
+    StopNoRecoil()
+    StopNoSpread()
+    StopNoSway()
+    StopSyncBooster()
+    StopAntiFall()
+    StopStrafeHvH()
+    StopSpinbot()
+    StopHideBody()
+    StopAimAssist()
+    StopTracerLoop()
+    StopXRay()
+    setFullBright(false)
+    setNoFog(false)
+    setNoBloom(false)
+    setNoSunRays(false)
+    setCustomFOV(false)
+    RestoreAllWeaponMods()
+
+    ClearAllESP()
+    ClearAllSkeletons()
+    ClearAllTracers()
+
+    for _, line in ipairs(SkeletonLinePool) do
+        pcall(function() line:Remove() end)
+    end
+    SkeletonLinePool = {}
+
+    if fovCircle then
+        pcall(function() fovCircle:Remove() end)
+        fovCircle = nil
+    end
+
+    if targetIndicator then
+        pcall(function() targetIndicator:Remove() end)
+        targetIndicator = nil
+    end
+
+    if aimAssistFOVCircle then
+        pcall(function() aimAssistFOVCircle:Remove() end)
+        aimAssistFOVCircle = nil
+    end
+
+    pcall(function() HudLabel:Remove() end)
+
+    stickyTarget = nil
+    stickyLastSeen = 0
+
+    for _, c in ipairs(tracerConnections) do
+        pcall(function() c:Disconnect() end)
+    end
+    tracerConnections = {}
+
+    if _env.TownUI_Window then
+        pcall(function()
+            if _env.TownUI_Window.GetSaveManager then
+                local sm = _env.TownUI_Window:GetSaveManager()
+                sm:Save("default")
+            end
+        end)
+    end
+
+    _env.TownUI_Window = nil
+    _env.TownComplete_Loaded = false
+end
+
+-- ============================================================
+-- 28. INIT
+-- ============================================================
+_env.print = realPrint
+_env.warn  = realWarn
+
+StartHideBody()
+
+task.delay(0.6, function()
+    if _env.TownUI_Window and _env.TownUI_Window.GetSaveManager then
+        pcall(function()
+            local sm = _env.TownUI_Window:GetSaveManager()
+            sm:Load("default")
+        end)
+    end
+end)
+
+task.delay(1.0, function()
+    if _env.TownUI_Window then
+        pcall(function()
+            _env.TownUI_Window:Notify("Town Complete v9.5.8", "RightShift = Menu | Y = Helper | End = Panic", 6, "Success")
+        end)
+    end
+end)
