@@ -3506,7 +3506,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 9: UI de Scryux
+-- BLOQUE 9: UI de Scryux (SIN CreateLabel - v9.8.2)
 -- ============================================================
 do
     local Settings = Vars.Settings
@@ -3514,7 +3514,7 @@ do
     local UserInputService = Vars.UserInputService
 
     local Window = ScryuxUI:CreateWindow({
-        Title = "Town Complete v9.8.1",
+        Title = "Town Complete v9.8.2",
         Size = UDim2.new(0, 720, 0, 640),
         Keybind = Settings.Hotkeys.ToggleMenu,
         Theme = "Default",
@@ -3529,8 +3529,6 @@ do
     -- TAB: ESP
     -- ============================================================
     local ESPTab = Window:CreateTab("ESP")
-    ESPTab:CreateLabel("Keybind: RightShift = Menu | End = Panic | Y = Helper")
-    ESPTab:CreateLabel("Version: v9.8.1")
     local ESPMain = ESPTab:CreateSection("ESP")
     ESPMain:CreateToggle({ Text = "ESP Master", Default = true, Index = "ESP_Enabled",
         Callback = function(v) Settings.ESP.Enabled = v end })
@@ -3657,7 +3655,6 @@ do
     -- ============================================================
     local AimbotTab = Window:CreateTab("Aimbot")
     local ASet = AimbotTab:CreateSection("Aimbot")
-    ASet:CreateLabel("Keybind: RightShift (abrir) | Y (helper)")
     ASet:CreateToggle({ Text = "Aimbot Master", Default = false, Index = "Aim_Enabled",
         Callback = function(v) Settings.Aimbot.Enabled = v end })
     ASet:CreateDropdown({ Text = "Method", Options = {"Camera","Mouse"}, Default = "Camera", Index = "Aim_Method",
@@ -3708,8 +3705,6 @@ do
         Callback = function(v) Settings.Aimbot.StickyTimeout = v end })
 
     local APMSet = AimbotTab:CreateSection("Aim Part Selection")
-    APMSet:CreateLabel("Selective FOV: apunta a la parte del cuerpo segun la posicion del mouse dentro del FOV")
-    APMSet:CreateLabel("Hybrid: base fija (Head) que baja lentamente a Torso/Legs")
     APMSet:CreateDropdown({ Text = "Aim Part Mode", Options = Vars.BODY_PARTS_ALL, Default = "Selective FOV", Index = "Aim_AimPartMode",
         Callback = function(v)
             Settings.Aimbot.AimPartMode = v
@@ -3884,7 +3879,6 @@ do
     -- ============================================================
     local BacktrackTab = Window:CreateTab("Backtrack")
     local BTSet = BacktrackTab:CreateSection("Backtrack (Rivals-style)")
-    BTSet:CreateLabel("Guarda historial de posiciones y apunta a posiciones pasadas")
     BTSet:CreateToggle({ Text = "Enable Backtrack", Default = false, Index = "BT_Enabled",
         Callback = function(v) Settings.Backtrack.Enabled = v end })
     BTSet:CreateSlider({ Text = "Delay (s)", Min = 0.02, Max = 0.3, Default = 0.1, Index = "BT_Delay",
@@ -3934,7 +3928,6 @@ do
         end })
     ExpSet:CreateSlider({ Text = "Spin Speed (deg/s)", Min = 60, Max = 2880, Default = 720, Index = "Exp_SpinSpeed",
         Callback = function(v) Settings.Exploit.SpinbotSpeed = v end })
-    ExpSet:CreateLabel("Gira continuamente aunque camines")
     ExpSet:CreateToggle({ Text = "Walkspeed", Default = false, Index = "Exp_Walkspeed",
         Callback = function(v)
             Settings.Exploit.Walkspeed = v
@@ -3961,20 +3954,17 @@ do
         end })
     ExpSet:CreateSlider({ Text = "Fly Speed", Min = 10, Max = 300, Default = 50, Index = "Exp_FlySpeed",
         Callback = function(v) Settings.Exploit.FlySpeed = v end })
-    ExpSet:CreateLabel("Fly: WASD + Space/LCtrl")
     ExpSet:CreateToggle({ Text = "Teleport to Cursor", Default = false, Index = "Exp_TeleportToCursor",
         Callback = function(v)
             Settings.Exploit.TeleportToCursor = v
             if v then Vars.StartExploitTeleport() else Vars.StopExploitTeleport() end
         end })
-    ExpSet:CreateLabel("Click izquierdo para teletransportarte")
 
     -- ============================================================
     -- TAB: Hotkeys
     -- ============================================================
     local HotkeyTab = Window:CreateTab("Hotkeys")
     local HKSet = HotkeyTab:CreateSection("Configurable Hotkeys")
-    HKSet:CreateLabel("Cambiar las teclas de acceso rapido")
     HKSet:CreateDropdown({ Text = "Toggle Menu", Options = {"RightShift","LeftShift","Insert","Home","F1","F2"}, Default = "RightShift", Index = "HK_ToggleMenu",
         Callback = function(v) if Enum.KeyCode[v] then Settings.Hotkeys.ToggleMenu = Enum.KeyCode[v] end end })
     HKSet:CreateDropdown({ Text = "Helper Toggle", Options = {"Y","U","I","O","P","H","J","K","L"}, Default = "Y", Index = "HK_Helper",
@@ -4223,7 +4213,7 @@ do
         if _env.TownUI_Window then
             pcall(function()
                 _env.TownUI_Window:Notify(
-                    "Town Complete v9.8.1",
+                    "Town Complete v9.8.2",
                     "RightShift = Menu | Y = Helper | End = Panic",
                     6, "Success"
                 )
