@@ -1,7 +1,7 @@
 --!strict
 -- ============================================================
--- Town Complete v9.8.0 (Scryux UI) - Parte 1/3
--- FOV Selectivo + Mejoras de Grok + Rivals + Solara-Adapted
+-- Town Complete v9.8.1 (Scryux UI) - Parte 1/3
+-- FIX: Stack overflow en GetCamera
 -- ============================================================
 
 local _env = getgenv and getgenv() or _G
@@ -9,7 +9,7 @@ local realPrint = print
 local realWarn  = warn
 
 -- ============================================================
--- BLOQUE 0: Logger con niveles (mejorado de Grok)
+-- BLOQUE 0: Logger con niveles
 -- ============================================================
 local Logger = {
     level = "WARN",
@@ -54,7 +54,7 @@ do
         "https://raw.githubusercontent.com/player2dwhite-tech/Scryux-Library/main/Scryux-Library.lua",
     }
     local CACHE_FILE = "scryux_ui_cache.lua"
-    local CACHE_VERSION = "v9.8.0"
+    local CACHE_VERSION = "v9.8.1"
 
     local function SafeRequest(url)
         if Has("request") then
@@ -134,14 +134,13 @@ if not ScryuxUI then
 end
 
 -- ============================================================
--- BLOQUE 2: Servicios + Configuración + Vars (con compactación de Grok)
+-- BLOQUE 2: Servicios + Configuración + Vars
 -- ============================================================
 local Vars = {}
 local Settings = {}
 local BODY_PARTS_ALL = {}
 
 do
-    -- ✅ Compactación estilo Grok (1 sola declaración múltiple)
     local Players, RunService, UserInputService, CoreGui, Stats, Lighting =
         game:GetService("Players"),
         game:GetService("RunService"),
@@ -152,6 +151,7 @@ do
 
     local LP = Players.LocalPlayer
     local Workspace = workspace
+    -- ✅ GetCamera definida UNA SOLA VEZ aquí (versión original)
     local function GetCamera() return Workspace.CurrentCamera end
 
     Vars.Players = Players
@@ -196,7 +196,6 @@ do
     Vars.noRecoilRunning = false
     Vars.noRecoilConnections = {}
 
-    -- ✅ X-Ray mejorado (Grok)
     Vars.xrayActive = false
     Vars.xrayThread = nil
     Vars.originalTransparency = {}
@@ -290,20 +289,14 @@ do
     Vars.currentSelectivePartName = nil
     Vars.currentHybridPartName = nil
 
-    -- ✅ NUEVO v9.8.0: Un solo loop ESP+Skeleton (Grok)
     Vars.espSkeletonConn = nil
 
-    -- ✅ NUEVO v9.8.0: Lighting guardado (Grok)
     Vars.OriginalLighting = nil
     Vars.lightingChildAddedConn = nil
 
-    -- ✅ NUEVO v9.8.0: Estado del ESP Pool
     Vars.lastESPUpdate = 0
     Vars.lastSkeletonUpdate = 0
 
-    -- ============================================================
-    -- CONFIGURACIÓN
-    -- ============================================================
     Settings = {
         ESP = {
             Enabled = true, Chams = true, TeamCheck = false,
@@ -417,7 +410,6 @@ do
             HideBody = false, HideHands = false, HideTool = false,
             BulletTracers = false, TracerColor = Color3.fromRGB(255, 50, 50),
             TracerLifetime = 2, TracerThickness = 2, TracerMaxDistance = 500,
-            -- ✅ NUEVO v9.8.0: Límite de tracers activos (Grok)
             MaxActiveTracers = 40,
             Crosshair = false,
             CrosshairColor = Color3.fromRGB(255, 255, 255),
@@ -480,8 +472,9 @@ do
     local os_clock = Vars.os_clock
     local string_find = Vars.string_find
 
-    local function GetCamera() return Vars.GetCamera() end
-    Vars.GetCamera = GetCamera
+    -- ✅ FIX: solo referencia local, NO sobrescribir Vars.GetCamera
+    -- (Esto causaba stack overflow porque Vars.GetCamera llamaba a sí misma)
+    local GetCamera = Vars.GetCamera
 
     local function IsMenuOpen()
         local w = _env.TownUI_Window
@@ -702,9 +695,6 @@ do
     end
     Vars.GetBonesForRig = GetBonesForRig
 
-    -- ============================================================
-    -- Predicción con aceleración + ping (Rivals)
-    -- ============================================================
     local function PredictPosition(part, amount, usePing)
         if not part then return nil end
         local pos = part.Position
@@ -722,9 +712,6 @@ do
     end
     Vars.PredictPosition = PredictPosition
 
-    -- ============================================================
-    -- FOV Selectivo
-    -- ============================================================
     local function GetSelectiveBodyPart(player, screenPos, fovCenter, fovRadius)
         if not player or not player.Character then return nil end
         local char = player.Character
@@ -810,9 +797,6 @@ do
     end
     Vars.GetSelectiveBodyPart = GetSelectiveBodyPart
 
-    -- ============================================================
-    -- Modo Híbrido
-    -- ============================================================
     local hybridState = {
         currentPart = "Head",
         lastChange = 0,
@@ -859,9 +843,6 @@ do
     end
     Vars.GetHybridBodyPart = GetHybridBodyPart
 
-    -- ============================================================
-    -- Bone Priority
-    -- ============================================================
     local function GetBestBodyPartByPriority(player, cam)
         if not player or not player.Character then return nil end
         local char = player.Character
@@ -888,9 +869,6 @@ do
     end
     Vars.GetBestBodyPartByPriority = GetBestBodyPartByPriority
 
-    -- ============================================================
-    -- Backtrack
-    -- ============================================================
     local function UpdatePositionHistory()
         local now = os_clock()
         for _, p in ipairs(Vars.activePlayers) do
@@ -927,7 +905,6 @@ do
     end
     Vars.GetBacktrackPosition = GetBacktrackPosition
 
-    -- Loop de historial
     Vars.posHistoryConn = Vars.RunService.Heartbeat:Connect(function()
         if Vars.isScriptUnloaded then return end
         if Settings.Backtrack.Enabled then
@@ -938,7 +915,6 @@ end
 
 -- ============================================================
 -- BLOQUE 4: ESP / Chams / Skeleton / HeadDots / Items / Weapons
--- (Optimizado con Grok: Pool compacto, Update compacto, Loops unificados)
 -- ============================================================
 do
     local LP = Vars.LP
@@ -956,12 +932,14 @@ do
     local string_find = Vars.string_find
     local os_clock = Vars.os_clock
 
-    local function GetCamera() return Vars.GetCamera() end
-    local function IsPassive(name) return Vars.IsPassive(name) end
-    local function CheckVisibility(p) return Vars.CheckVisibility(p) end
-    local function GetBoundingVectors(c) return Vars.GetBoundingVectors(c) end
-    local function GetRigType(c) return Vars.GetRigType(c) end
-    local function GetBonesForRig(r) return Vars.GetBonesForRig(r) end
+    -- ✅ Referencias locales (NO sobrescriben Vars)
+    local GetCamera = Vars.GetCamera
+    local IsPassive = Vars.IsPassive
+    local CheckVisibility = Vars.CheckVisibility
+    local GetBoundingVectors = Vars.GetBoundingVectors
+    local GetRigType = Vars.GetRigType
+    local GetBonesForRig = Vars.GetBonesForRig
+    local SilentPcall = Vars.SilentPcall
 
     -- ============================================================
     -- Skeleton line pool
@@ -1136,7 +1114,6 @@ do
         local char = player.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
 
-        -- Early return si no hay personaje, está muerto o ESP desactivado
         if not char or not hum or hum.Health <= 0 or not Settings.ESP.Enabled then
             if esp then
                 esp.box.Visible = false
@@ -1154,7 +1131,6 @@ do
         local boxPos, boxSize, isVisible = GetBoundingVectors(char)
         local color = GetESPColor(player)
 
-        -- Chams
         if Settings.ESP.Chams then
             esp.chams.Adornee = char
             esp.chams.FillColor = color
@@ -1168,7 +1144,6 @@ do
             esp.chams.Enabled = false
         end
 
-        -- Si no está en pantalla, ocultamos todo lo 2D
         if not isVisible or not boxPos or not boxSize then
             esp.box.Visible = false
             esp.health.Visible = false
@@ -1179,7 +1154,6 @@ do
             return
         end
 
-        -- Box
         esp.box.Visible = Settings.ESP.Box
         if Settings.ESP.Box then
             esp.box.Position = boxPos
@@ -1188,7 +1162,6 @@ do
             esp.box.Thickness = Settings.ESP.BoxThickness
         end
 
-        -- Health
         if Settings.ESP.ShowHealth then
             local hp = math_clamp(hum.Health / math_max(hum.MaxHealth, 1), 0, 1)
             esp.health.From = V2(boxPos.X - 5, boxPos.Y + boxSize.Y)
@@ -1200,7 +1173,6 @@ do
             esp.health.Visible = false
         end
 
-        -- Name
         if Settings.ESP.ShowName then
             local text = player.Name
             if Settings.ESP.ShowDistance and LP.Character then
@@ -1218,7 +1190,6 @@ do
             esp.name.Visible = false
         end
 
-        -- Head Dot
         if Settings.ESP.HeadDots and esp.headDot then
             local head = char:FindFirstChild("Head")
             if head then
@@ -1240,7 +1211,6 @@ do
             esp.headDot.Visible = false
         end
 
-        -- Weapon
         if Settings.ESP.Weapons and esp.weapon then
             local tool = char:FindFirstChildOfClass("Tool")
             if tool then
@@ -1351,19 +1321,15 @@ do
 
     local function IsItemPart(part)
         if not part or not part:IsA("BasePart") then return false end
-
-        -- Evitar partes de personajes (Grok)
         local model = part:FindFirstAncestorOfClass("Model")
         if model and model:FindFirstChildOfClass("Humanoid") then
             return false
         end
-
         local name = part.Name:lower()
         if name:find("weapon") or name:find("gun") or name:find("collectible")
             or name:find("pickup") or name:find("item") or name:find("loot") then
             return true
         end
-
         local parent = part.Parent
         if parent and parent:IsA("Tool") then return true end
         return false
@@ -1446,7 +1412,6 @@ do
     end
     Vars.UpdateItemESP = UpdateItemESP
 
-    -- Conexiones (con task.defer - Grok)
     if not Vars.itemAddedConn then
         Vars.itemAddedConn = Vars.Workspace.DescendantAdded:Connect(function(desc)
             if Vars.isScriptUnloaded then return end
@@ -1482,7 +1447,7 @@ do
     RebuildActivePlayers()
 
     -- ============================================================
-    -- ✅ NUEVO v9.8.0: UN SOLO LOOP ESP + Skeleton (Grok)
+    -- Loop unificado ESP + Skeleton
     -- ============================================================
     Vars.espSkeletonConn = Vars.RunService.RenderStepped:Connect(function()
         if Vars.isScriptUnloaded then return end
@@ -1491,30 +1456,28 @@ do
         local players = Vars.activePlayers
         if not players or #players == 0 then return end
 
-        -- ========== ESP ==========
         if Settings.ESP.Enabled then
             local espRate = Settings.Performance.ESPUpdateRate or 0.03
             if (now - Vars.lastESPUpdate) >= espRate then
                 Vars.lastESPUpdate = now
 
                 for i = 1, #players do
-                    Vars.SilentPcall(UpdateESPForPlayer, players[i])
+                    SilentPcall(UpdateESPForPlayer, players[i])
                 end
 
                 if Settings.ESP.Items then
-                    Vars.SilentPcall(UpdateItemESP)
+                    SilentPcall(UpdateItemESP)
                 end
             end
         end
 
-        -- ========== Skeleton ==========
         if Settings.Skeleton.Enabled then
             local skRate = Settings.Performance.SkeletonUpdateRate or 0.04
             if (now - Vars.lastSkeletonUpdate) >= skRate then
                 Vars.lastSkeletonUpdate = now
 
                 for i = 1, #players do
-                    Vars.SilentPcall(UpdateSkeletonForPlayer, players[i])
+                    SilentPcall(UpdateSkeletonForPlayer, players[i])
                 end
             end
         end
@@ -1522,7 +1485,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 5: HUD + Eventos + Lighting (mejorado - Grok) + Custom FOV + HideBody + Crosshair
+-- BLOQUE 5: HUD + Eventos + Lighting + Custom FOV + HideBody + Crosshair
 -- ============================================================
 do
     local Players = Vars.Players
@@ -1539,11 +1502,8 @@ do
     local table_insert = Vars.table_insert
     local os_clock = Vars.os_clock
 
-    local function GetCamera() return Vars.GetCamera() end
+    local GetCamera = Vars.GetCamera
 
-    -- ============================================================
-    -- HUD
-    -- ============================================================
     local HudLabel = Drawing.new("Text")
     HudLabel.Visible = false
     HudLabel.Size = 18
@@ -1645,9 +1605,6 @@ do
         end
     end)
 
-    -- ============================================================
-    -- Eventos de jugadores
-    -- ============================================================
     Vars.playerAddedConn = Players.PlayerAdded:Connect(function(p)
         if p ~= LP then Vars.RebuildActivePlayers() end
     end)
@@ -1682,10 +1639,8 @@ do
     end
 
     -- ============================================================
-    -- ✅ Visuals / Lighting (mejorado - Grok)
+    -- Visuals / Lighting (mejorado - Grok)
     -- ============================================================
-
-    -- Guardar valores originales una sola vez
     local function SaveOriginalLighting()
         if Vars.OriginalLighting then return end
         Vars.OriginalLighting = {
@@ -1780,7 +1735,6 @@ do
     end
     Vars.setCustomFOV = setCustomFOV
 
-    -- Reset total de visuales
     local function ResetAllVisuals()
         setFullBright(false)
         setNoFog(false)
@@ -1790,7 +1744,6 @@ do
     end
     Vars.ResetAllVisuals = ResetAllVisuals
 
-    -- Detectar efectos nuevos (Bloom/SunRays) que el juego cree después (Grok)
     Vars.lightingChildAddedConn = Lighting.ChildAdded:Connect(function(child)
         if Vars.isScriptUnloaded then return end
         if Settings.Visuals.NoBloom and child:IsA("BloomEffect") then
@@ -1862,7 +1815,7 @@ do
     Vars.StopHideBody = StopHideBody
 
     -- ============================================================
-    -- Crosshair (con RaycastParams reutilizado)
+    -- Crosshair
     -- ============================================================
     local function CreateCrosshairLines()
         for _, line in ipairs(Vars.CrosshairLines) do
@@ -1964,10 +1917,10 @@ do
     local os_clock = Vars.os_clock
     local string_find = Vars.string_find
 
-    local function GetCamera() return Vars.GetCamera() end
+    local GetCamera = Vars.GetCamera
 
     -- ============================================================
-    -- ✅ Tracers mejorados (Grok)
+    -- Tracers mejorados (Grok)
     -- ============================================================
     local function AcquireTracer()
         local t = table_remove(Vars.TracerPool)
@@ -1998,7 +1951,6 @@ do
         local dist = (fromPos - toPos).Magnitude
         if dist > Settings.Visuals.TracerMaxDistance then return end
 
-        -- Límite de tracers activos (Grok)
         local maxActive = Settings.Visuals.MaxActiveTracers or 40
         if #Vars.ActiveTracers >= maxActive then
             local oldest = table_remove(Vars.ActiveTracers, 1)
@@ -2041,7 +1993,6 @@ do
                 local v1, onScreen1 = cam:WorldToViewportPoint(data.fromPos)
                 local v2, onScreen2 = cam:WorldToViewportPoint(data.toPos)
 
-                -- ✅ Mostrar si al menos uno está en pantalla (Grok)
                 if onScreen1 or onScreen2 then
                     data.tracer.From = V2(v1.X, v1.Y)
                     data.tracer.To = V2(v2.X, v2.Y)
@@ -2089,7 +2040,7 @@ do
     StartTracerLoop()
 
     -- ============================================================
-    -- No Recoil (UNIFICADO en un solo Heartbeat)
+    -- No Recoil unificado
     -- ============================================================
     local noRecoilCache = {}
 
@@ -2231,7 +2182,7 @@ do
     Vars.StopNoRecoil = StopNoRecoil
 
     -- ============================================================
-    -- X-Ray (mejorado - Grok: limpieza cada 30s)
+    -- X-Ray
     -- ============================================================
     local function StartXRay()
         if Vars.xrayThread then return end
@@ -2328,17 +2279,18 @@ do
     local table_insert = Vars.table_insert
     local os_clock = Vars.os_clock
 
-    local function GetCamera() return Vars.GetCamera() end
-    local function IsMenuOpen() return Vars.IsMenuOpen() end
-    local function CheckVisibility(p) return Vars.CheckVisibility(p) end
-    local function IsPassive(n) return Vars.IsPassive(n) end
-    local function GetRigType(c) return Vars.GetRigType(c) end
-    local function hasGunScript(c) return Vars.hasGunScript(c) end
-    local function PredictPosition(p, a, ping) return Vars.PredictPosition(p, a, ping) end
-    local function GetSelectiveBodyPart(p, sp, c, r) return Vars.GetSelectiveBodyPart(p, sp, c, r) end
-    local function GetHybridBodyPart(p, sp, c, r) return Vars.GetHybridBodyPart(p, sp, c, r) end
-    local function GetBestBodyPartByPriority(p, cam) return Vars.GetBestBodyPartByPriority(p, cam) end
-    local function GetBacktrackPosition(name, delay) return Vars.GetBacktrackPosition(name, delay) end
+    -- ✅ Referencias locales (NO sobrescriben Vars)
+    local GetCamera = Vars.GetCamera
+    local IsMenuOpen = Vars.IsMenuOpen
+    local CheckVisibility = Vars.CheckVisibility
+    local IsPassive = Vars.IsPassive
+    local GetRigType = Vars.GetRigType
+    local hasGunScript = Vars.hasGunScript
+    local PredictPosition = Vars.PredictPosition
+    local GetSelectiveBodyPart = Vars.GetSelectiveBodyPart
+    local GetHybridBodyPart = Vars.GetHybridBodyPart
+    local GetBestBodyPartByPriority = Vars.GetBestBodyPartByPriority
+    local GetBacktrackPosition = Vars.GetBacktrackPosition
 
     local BODY_PARTS = {
         "Head", "UpperTorso", "LowerTorso", "Torso", "HumanoidRootPart",
@@ -3357,7 +3309,7 @@ do
     end
 
     -- ============================================================
-    -- EXPLOIT: Spinbot (no se atasca al caminar)
+    -- Spinbot
     -- ============================================================
     local lastSpin = 0
     local spinAngle = 0
@@ -3554,14 +3506,15 @@ do
 end
 
 -- ============================================================
--- BLOQUE 9: UI de Scryux (v9.8.0 con nuevas opciones)
+-- BLOQUE 9: UI de Scryux
 -- ============================================================
 do
     local Settings = Vars.Settings
     local table_insert = Vars.table_insert
+    local UserInputService = Vars.UserInputService
 
     local Window = ScryuxUI:CreateWindow({
-        Title = "Town Complete v9.8.0",
+        Title = "Town Complete v9.8.1",
         Size = UDim2.new(0, 720, 0, 640),
         Keybind = Settings.Hotkeys.ToggleMenu,
         Theme = "Default",
@@ -3577,7 +3530,7 @@ do
     -- ============================================================
     local ESPTab = Window:CreateTab("ESP")
     ESPTab:CreateLabel("Keybind: RightShift = Menu | End = Panic | Y = Helper")
-    ESPTab:CreateLabel("Version: v9.8.0")
+    ESPTab:CreateLabel("Version: v9.8.1")
     local ESPMain = ESPTab:CreateSection("ESP")
     ESPMain:CreateToggle({ Text = "ESP Master", Default = true, Index = "ESP_Enabled",
         Callback = function(v) Settings.ESP.Enabled = v end })
@@ -3754,7 +3707,6 @@ do
     ASet:CreateSlider({ Text = "Sticky Timeout (s)", Min = 0.5, Max = 10, Default = 2, Index = "Aim_StickyTimeout",
         Callback = function(v) Settings.Aimbot.StickyTimeout = v end })
 
-    -- Aim Part Selection
     local APMSet = AimbotTab:CreateSection("Aim Part Selection")
     APMSet:CreateLabel("Selective FOV: apunta a la parte del cuerpo segun la posicion del mouse dentro del FOV")
     APMSet:CreateLabel("Hybrid: base fija (Head) que baja lentamente a Torso/Legs")
@@ -3764,7 +3716,6 @@ do
             Vars.targetTransition.previousPlayer = nil
         end })
 
-    -- Selective FOV zones
     local SelSet = AimbotTab:CreateSection("Selective FOV Zones")
     SelSet:CreateSlider({ Text = "Head Zone Bottom", Min = 0, Max = 1, Default = 0.35, Index = "Sel_HeadBottom",
         Callback = function(v) Settings.Aimbot.Selective.HeadZoneBottom = v end })
@@ -3779,7 +3730,6 @@ do
     SelSet:CreateSlider({ Text = "Deadzone Radius", Min = 0, Max = 0.5, Default = 0.05, Index = "Sel_Deadzone",
         Callback = function(v) Settings.Aimbot.Selective.DeadzoneRadius = v end })
 
-    -- Hybrid
     local HybSet = AimbotTab:CreateSection("Hybrid Mode")
     HybSet:CreateDropdown({ Text = "Hybrid Base Part", Options = {"Head", "UpperTorso", "Torso", "LowerTorso"}, Default = "Head", Index = "Hyb_BasePart",
         Callback = function(v) Settings.Aimbot.Hybrid.BasePart = v end })
@@ -3790,7 +3740,6 @@ do
     HybSet:CreateToggle({ Text = "Allow Return (up)", Default = true, Index = "Hyb_AllowReturn",
         Callback = function(v) Settings.Aimbot.Hybrid.AllowReturn = v end })
 
-    -- Whitelist
     local WLSet = AimbotTab:CreateSection("Whitelist")
     WLSet:CreateButton("Toggle Whitelist (current target)", function()
         local t = Vars.TargetManager:GetCurrentTarget()
@@ -3877,7 +3826,6 @@ do
         Callback = function(v) Vars.setNoBloom(v) end })
     VLight:CreateToggle({ Text = "No SunRays", Default = false, Index = "Vis_NoSunRays",
         Callback = function(v) Vars.setNoSunRays(v) end })
-    -- ✅ NUEVO v9.8.0: Reset All Visuals (Grok)
     VLight:CreateButton("Reset All Visuals", function()
         if Vars.ResetAllVisuals then Vars.ResetAllVisuals() end
         Window:Notify("Visuals", "Reset aplicado", 2, "Success")
@@ -3900,9 +3848,6 @@ do
     VHide:CreateToggle({ Text = "Also Hide Equipped Tool", Default = false, Index = "Vis_HideTool",
         Callback = function(v) Settings.Visuals.HideTool = v end })
 
-    -- ============================================================
-    -- ✅ Tracers (mejorado v9.8.0 con MaxActiveTracers de Grok)
-    -- ============================================================
     local VTracer = VisualsTab:CreateSection("Bullet Tracers")
     VTracer:CreateToggle({ Text = "Bullet Tracers", Default = false, Index = "Vis_BulletTracers",
         Callback = function(v) Settings.Visuals.BulletTracers = v end })
@@ -3914,7 +3859,6 @@ do
         Callback = function(v) Settings.Visuals.TracerThickness = v end })
     VTracer:CreateSlider({ Text = "Max Distance", Min = 50, Max = 2000, Default = 500, Index = "Vis_TracerMaxDist",
         Callback = function(v) Settings.Visuals.TracerMaxDistance = v end })
-    -- ✅ NUEVO v9.8.0
     VTracer:CreateSlider({ Text = "Max Active Tracers", Min = 5, Max = 200, Default = 40, Index = "Vis_MaxActiveTracers",
         Callback = function(v) Settings.Visuals.MaxActiveTracers = math.floor(v) end })
 
@@ -4144,7 +4088,6 @@ do
             Vars.StopCrosshair()
             Vars.StopTracerLoop()
             Vars.ClearAllTracers()
-            -- ✅ NUEVO v9.8.0: Reset visuales con función de Grok
             if Vars.ResetAllVisuals then
                 Vars.ResetAllVisuals()
             else
@@ -4173,7 +4116,6 @@ do
     _env.TownComplete_Cleanup = function()
         Vars.isScriptUnloaded = true
 
-        -- ✅ Desconectar todas las conexiones (incluyendo las nuevas)
         pcall(function() Vars.espSkeletonConn:Disconnect() end)
         pcall(function() Vars.fpsCounterConn:Disconnect() end)
         pcall(function() Vars.pingUpdateConn:Disconnect() end)
@@ -4194,10 +4136,8 @@ do
         pcall(function() Vars.exploitFlyKeyConn:Disconnect() end)
         pcall(function() Vars.exploitFlyKeyEndConn:Disconnect() end)
         pcall(function() Vars.posHistoryConn:Disconnect() end)
-        -- ✅ NUEVO v9.8.0: Lighting ChildAdded (Grok)
         pcall(function() Vars.lightingChildAddedConn:Disconnect() end)
 
-        -- Detener todos los módulos activos
         Vars.StopNoRecoil()
         Vars.StopSyncBooster()
         Vars.StopAntiFall()
@@ -4213,7 +4153,6 @@ do
         Vars.StopCrosshair()
         Vars.StopTracerLoop()
         Vars.StopXRay()
-        -- ✅ Reset visuales con función de Grok
         if Vars.ResetAllVisuals then
             Vars.ResetAllVisuals()
         else
@@ -4224,7 +4163,6 @@ do
             Vars.setCustomFOV(false)
         end
 
-        -- Limpiar todo el ESP / Skeleton / Tracers / Items
         Vars.ClearAllESP()
         Vars.ClearAllSkeletons()
         Vars.ClearAllTracers()
@@ -4285,7 +4223,7 @@ do
         if _env.TownUI_Window then
             pcall(function()
                 _env.TownUI_Window:Notify(
-                    "Town Complete v9.8.0",
+                    "Town Complete v9.8.1",
                     "RightShift = Menu | Y = Helper | End = Panic",
                     6, "Success"
                 )
