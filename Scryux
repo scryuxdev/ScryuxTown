@@ -1,8 +1,6 @@
 --!strict
 -- ============================================================
--- Town Complete v9.6.2 (Scryux UI) - Parte 1/3
--- Fix: Out of local registers con do...end blocks
--- Nuevo: Head Dots, Items, Weapons, Crosshair, Exploit Tab (Spin fix)
+-- Town Complete v9.6.3 (Scryux UI) - Parte 1/3
 -- ============================================================
 
 local _env = getgenv and getgenv() or _G
@@ -199,7 +197,6 @@ do
     Vars.strafeKeyLeftHeld = false
     Vars.strafeKeyRightHeld = false
 
-    -- Spinbot (Exploit)
     Vars.spinbotConnection = nil
     Vars.spinbotActive = false
     Vars.spinbotOriginalCFrame = nil
@@ -236,11 +233,9 @@ do
 
     Vars.whitelist = {}
 
-    -- Crosshair
     Vars.CrosshairLines = {}
     Vars.CrosshairConn = nil
 
-    -- Exploit
     Vars.exploitWalkspeedConn = nil
     Vars.exploitJumpConn = nil
     Vars.exploitNoclipConn = nil
@@ -250,7 +245,6 @@ do
     Vars.exploitFlyKeyEndConn = nil
     Vars.exploitTeleportConn = nil
 
-    -- Settings
     Settings = {
         ESP = {
             Enabled = true, Chams = true, TeamCheck = false,
@@ -265,7 +259,6 @@ do
             ChamsOutlineColor = Color3.new(1, 1, 1),
             ChamsDepthMode = "AlwaysOnTop",
             WallcheckChams = false,
-            -- NUEVO
             HeadDots = false,
             HeadDotColor = Color3.fromRGB(255, 255, 0),
             HeadDotRadius = 5,
@@ -324,7 +317,6 @@ do
             HideBody = false, HideHands = false, HideTool = false,
             BulletTracers = false, TracerColor = Color3.fromRGB(255, 50, 50),
             TracerLifetime = 2, TracerThickness = 2, TracerMaxDistance = 500,
-            -- NUEVO
             Crosshair = false,
             CrosshairColor = Color3.fromRGB(255, 255, 255),
             CrosshairEnemyColor = Color3.fromRGB(255, 0, 0),
@@ -342,7 +334,6 @@ do
             StrafeEnabled = false, StrafeDistance = 0.3, PeekCooldown = 0.08,
             StrafeKeyLeft = Enum.KeyCode.A, StrafeKeyRight = Enum.KeyCode.D,
         },
-        -- NUEVO: EXPLOIT TAB
         Exploit = {
             Spinbot = false,
             SpinbotSpeed = 720,
@@ -852,7 +843,6 @@ do
             esp.name.Color = Settings.ESP.NameColor
         else esp.name.Visible = false end
 
-        -- Head Dots
         if Settings.ESP.HeadDots and Settings.ESP.Enabled and esp.headDot then
             local headPart = char:FindFirstChild("Head")
             if headPart then
@@ -874,7 +864,6 @@ do
             if esp.headDot then esp.headDot.Visible = false end
         end
 
-        -- Weapons
         if Settings.ESP.Weapons and Settings.ESP.Enabled and esp.weapon then
             local tool = char:FindFirstChildOfClass("Tool")
             if tool then
@@ -892,7 +881,6 @@ do
     end
     Vars.UpdateESPForPlayer = UpdateESPForPlayer
 
-    -- Update Skeleton
     local function UpdateSkeletonForPlayer(player)
         if not player or player == LP then return end
         if not Settings.Skeleton.Enabled then
@@ -963,7 +951,6 @@ do
     end
     Vars.UpdateSkeletonForPlayer = UpdateSkeletonForPlayer
 
-    -- ESP Items
     local function IsItemPart(part)
         if not part or not part:IsA("BasePart") then return false end
         local name = part.Name:lower()
@@ -1050,7 +1037,6 @@ do
         end
     end)
 
-    -- Rebuild active players
     local function RebuildActivePlayers()
         Vars.activePlayers = {}
         for _, p in ipairs(Vars.Players:GetPlayers()) do
@@ -1061,7 +1047,6 @@ do
     end
     Vars.RebuildActivePlayers = RebuildActivePlayers
 
-    -- Main loops
     local lastESPUpdate = 0
     local lastSkeletonUpdate = 0
 
@@ -1111,7 +1096,6 @@ do
 
     local function GetCamera() return Vars.GetCamera() end
 
-    -- HUD
     local HudLabel = Drawing.new("Text")
     HudLabel.Visible = false
     HudLabel.Size = 18
@@ -1184,7 +1168,6 @@ do
         end
     end)
 
-    -- Eventos de jugadores
     Vars.playerAddedConn = Players.PlayerAdded:Connect(function(p)
         if p ~= LP then Vars.RebuildActivePlayers() end
     end)
@@ -1214,7 +1197,6 @@ do
         end
     end
 
-    -- Lighting
     local function setFullBright(v)
         Lighting.Brightness = v and 3 or 1
         Lighting.FogEnd = v and 99999 or 1000
@@ -1251,7 +1233,6 @@ do
     end
     Vars.setNoSunRays = setNoSunRays
 
-    -- Custom FOV
     local function setCustomFOV(v, value)
         local cam = GetCamera()
         if not cam then return end
@@ -1269,7 +1250,6 @@ do
     end
     Vars.setCustomFOV = setCustomFOV
 
-    -- Hide Body
     local HIDE_BODY_PARTS = {
         "UpperTorso", "LowerTorso", "Torso",
         "LeftUpperArm", "LeftLowerArm", "RightUpperArm", "RightLowerArm",
@@ -1327,7 +1307,6 @@ do
     end
     Vars.StopHideBody = StopHideBody
 
-    -- Custom Crosshair
     local function CreateCrosshairLines()
         for _, line in ipairs(Vars.CrosshairLines) do
             pcall(function() line:Remove() end)
@@ -1431,7 +1410,6 @@ do
 
     local function GetCamera() return Vars.GetCamera() end
 
-    -- Bullet Tracers
     local function AcquireTracer()
         local t = table_remove(Vars.TracerPool)
         if t then t.Visible = false; return t end
@@ -1527,7 +1505,6 @@ do
 
     StartTracerLoop()
 
-    -- No Recoil
     local noRecoilCache = {}
 
     local function RebuildNoRecoilCache()
@@ -1702,7 +1679,6 @@ do
     end
     Vars.StopNoRecoil = StopNoRecoil
 
-    -- X-Ray
     local function StartXRay()
         if Vars.xrayThread then return end
         Vars.xrayActive = true
@@ -2316,7 +2292,6 @@ do
         if input.KeyCode == Settings.Aimbot.AimKey then Vars.aimKeyHeld = false end
     end)
 
-    -- AIM ASSIST
     local function GetAimAssistTarget()
         if not LP.Character then return nil end
         local lr = LP.Character:FindFirstChild("HumanoidRootPart")
@@ -2470,12 +2445,10 @@ do
     local V2 = Vars.Vector2_new
     local V3 = Vars.Vector3_new
     local CFrame_new = Vars.CFrame_new
-    local CFrame_Angles = Vars.CFrame_Angles
     local math_rad = Vars.math_rad
     local table_insert = Vars.table_insert
     local os_clock = Vars.os_clock
 
-    -- Sync Booster
     local function SafeSetFPS(cap)
         if type(setfpscap) == "function" then pcall(function() setfpscap(cap) end) end
     end
@@ -2603,7 +2576,6 @@ do
         end
     end)
 
-    -- Anti-Fall
     local function StartAntiFall()
         if Vars.antiFallRunning then return end
         Vars.antiFallRunning = true
@@ -2661,7 +2633,6 @@ do
     end
     Vars.StopAntiFall = StopAntiFall
 
-    -- Strafe HvH
     local strafeLeftConn = nil
     local strafeLeftEndConn = nil
     local lastPeek = 0
@@ -2713,42 +2684,31 @@ do
         if strafeLeftEndConn then pcall(function() strafeLeftEndConn:Disconnect() end); strafeLeftEndConn = nil end
     end
 
-    -- ==========================================
-    -- EXPLOIT TAB
-    -- ==========================================
-
-    -- Spinbot FIX: ahora usa Heartbeat con delta y CFrame.Angles continuo
-    -- No se atasca al caminar porque no usa Humanoid.WalkSpeed ni estado
+    -- EXPLOIT: Spinbot FIX (no se atasca al caminar)
     local lastSpin = 0
     local spinAngle = 0
     Vars.StartExploitSpinbot = function()
         if Vars.spinbotConnection then return end
         Vars.spinbotActive = true
         lastSpin = os_clock()
-        Vars.spinbotConnection = RunService.RenderStepped:Connect(function(dt)
+        Vars.spinbotConnection = RunService.RenderStepped:Connect(function()
             if Vars.isScriptUnloaded or not Settings.Exploit.Spinbot then return end
             local char = LP.Character
             if not char then return end
             local root = char:FindFirstChild("HumanoidRootPart")
             if not root or not root:IsA("BasePart") then return end
-
             local now = os_clock()
             local delta = now - lastSpin
             lastSpin = now
             if delta > 0.5 then delta = 0.5 end
-
             spinAngle = spinAngle + math_rad(Settings.Exploit.SpinbotSpeed) * delta
             if spinAngle > math.pi * 2 then
                 spinAngle = spinAngle - math.pi * 2
             end
-
-            -- Aplicar rotación al root SIN tocar WalkSpeed ni Humanoid
-            -- Esto permite caminar mientras gira
             pcall(function()
                 local currentPos = root.Position
                 local currentLook = root.CFrame.LookVector
-                -- Calcular nuevo LookVector rotado por spinAngle
-                local rotatedLook = Vector3.new(
+                local rotatedLook = V3(
                     currentLook.X * math.cos(spinAngle) - currentLook.Z * math.sin(spinAngle),
                     currentLook.Y,
                     currentLook.X * math.sin(spinAngle) + currentLook.Z * math.cos(spinAngle)
@@ -2766,7 +2726,6 @@ do
         end
     end
 
-    -- Walkspeed
     Vars.StartExploitWalkspeed = function()
         if Vars.exploitWalkspeedConn then return end
         Vars.exploitWalkspeedConn = RunService.Heartbeat:Connect(function()
@@ -2787,7 +2746,6 @@ do
         end
     end
 
-    -- JumpPower
     Vars.StartExploitJumpPower = function()
         if Vars.exploitJumpConn then return end
         Vars.exploitJumpConn = RunService.Heartbeat:Connect(function()
@@ -2808,7 +2766,6 @@ do
         end
     end
 
-    -- Noclip
     Vars.StartExploitNoclip = function()
         if Vars.exploitNoclipConn then return end
         Vars.exploitNoclipConn = RunService.Stepped:Connect(function()
@@ -2837,7 +2794,6 @@ do
         end
     end
 
-    -- Fly
     Vars.StartExploitFly = function()
         if Vars.exploitFlyConn then return end
         Vars.exploitFlyConn = RunService.Heartbeat:Connect(function()
@@ -2891,7 +2847,6 @@ do
         end
     end)
 
-    -- Teleport to Cursor
     Vars.StartExploitTeleport = function()
         if Vars.exploitTeleportConn then return end
         Vars.exploitTeleportConn = UserInputService.InputBegan:Connect(function(input, gp)
@@ -2929,11 +2884,10 @@ end
 -- ============================================================
 do
     local Settings = Vars.Settings
-    local V2 = Vars.Vector2_new
     local table_insert = Vars.table_insert
 
     local Window = ScryuxUI:CreateWindow({
-        Title = "Town Complete v9.6.2",
+        Title = "Town Complete v9.6.3",
         Size = UDim2.new(0, 680, 0, 580),
         Keybind = Enum.KeyCode.RightShift,
         Theme = "Default",
@@ -2944,10 +2898,9 @@ do
     _env.TownUI_Window = Window
     Vars.Window = Window
 
-    -- ESP Tab
     local ESPTab = Window:CreateTab("ESP")
     ESPTab:CreateLabel("Keybind: RightShift = Menu | End = Panic | Y = Helper")
-    ESPTab:CreateLabel("Version: v9.6.2")
+    ESPTab:CreateLabel("Version: v9.6.3")
     local ESPMain = ESPTab:CreateSection("ESP")
     ESPMain:CreateToggle({ Text = "ESP Master", Default = true, Index = "ESP_Enabled",
         Callback = function(v) Settings.ESP.Enabled = v end })
@@ -2983,7 +2936,6 @@ do
         end })
     ESPInfo:CreateToggle({ Text = "Show Distance", Default = false, Index = "ESP_Distance",
         Callback = function(v) Settings.ESP.ShowDistance = v end })
-
     ESPInfo:CreateToggle({ Text = "Head Dots", Default = false, Index = "ESP_HeadDots",
         Callback = function(v)
             Settings.ESP.HeadDots = v
@@ -2997,7 +2949,6 @@ do
         Callback = function(c) Settings.ESP.HeadDotColor = c end })
     ESPInfo:CreateSlider({ Text = "Head Dot Radius", Min = 1, Max = 15, Default = 5, Index = "ESP_HeadDotRadius",
         Callback = function(v) Settings.ESP.HeadDotRadius = v end })
-
     ESPInfo:CreateToggle({ Text = "Items (armas tiradas)", Default = false, Index = "ESP_Items",
         Callback = function(v)
             Settings.ESP.Items = v
@@ -3013,7 +2964,6 @@ do
         Callback = function(c) Settings.ESP.ItemColor = c end })
     ESPInfo:CreateSlider({ Text = "Item Max Distance", Min = 50, Max = 2000, Default = 500, Index = "ESP_ItemMaxDist",
         Callback = function(v) Settings.ESP.ItemMaxDistance = v end })
-
     ESPInfo:CreateToggle({ Text = "Weapons (arma del enemigo)", Default = false, Index = "ESP_Weapons",
         Callback = function(v)
             Settings.ESP.Weapons = v
@@ -3045,7 +2995,6 @@ do
     ESPChams:CreateToggle({ Text = "Wallcheck Chams ESP", Default = false, Index = "ESP_WallcheckChams",
         Callback = function(v) Settings.ESP.WallcheckChams = v end })
 
-    -- Skeleton Tab
     local SkeletonTab = Window:CreateTab("Skeleton")
     local SkelMain = SkeletonTab:CreateSection("Skeleton ESP")
     SkelMain:CreateToggle({ Text = "Skeleton Master", Default = true, Index = "Skel_Enabled",
@@ -3070,7 +3019,6 @@ do
     SkelMain:CreateToggle({ Text = "Only Visible", Default = false, Index = "Skel_OnlyVisible",
         Callback = function(v) Settings.Skeleton.OnlyVisible = v end })
 
-    -- Aimbot Tab
     local AimbotTab = Window:CreateTab("Aimbot")
     local ASet = AimbotTab:CreateSection("Aimbot")
     ASet:CreateLabel("Keybind: RightShift (abrir) | Y (helper)")
@@ -3138,7 +3086,6 @@ do
         end
     end)
 
-    -- Aim Assist Tab
     local AimAssistTab = Window:CreateTab("Aim Assist")
     local AASet = AimAssistTab:CreateSection("Aim Assist")
     AASet:CreateToggle({ Text = "Aim Assist Master", Default = false, Index = "AA_Enabled",
@@ -3177,7 +3124,6 @@ do
     AASet:CreateSlider({ Text = "Prediction Amount", Min = 0.01, Max = 0.3, Default = 0.13, Index = "AA_PredAmount",
         Callback = function(v) Settings.AimAssist.PredictionAmount = v end })
 
-    -- Weapon Mods Tab
     local WeaponTab = Window:CreateTab("Weapon Mods")
     local WS = WeaponTab:CreateSection("Weapon")
     WS:CreateToggle({ Text = "No Recoil", Default = false, Index = "W_NoRecoil",
@@ -3186,7 +3132,6 @@ do
             if v then Vars.StartNoRecoil() else Vars.StopNoRecoil() end
         end })
 
-    -- Visuals Tab
     local VisualsTab = Window:CreateTab("Visuals")
     local VLight = VisualsTab:CreateSection("Lighting")
     VLight:CreateToggle({ Text = "Full Bright", Default = false, Index = "Vis_FullBright",
@@ -3249,7 +3194,6 @@ do
     VCross:CreateSlider({ Text = "Gap", Min = 0, Max = 20, Default = 4, Index = "Vis_CrosshairGap",
         Callback = function(v) Settings.Visuals.CrosshairGap = v end })
 
-    -- Anti-Fall
     local AntiFallTab = Window:CreateTab("Anti-Fall")
     local AFSection = AntiFallTab:CreateSection("Anti-Fall Damage")
     AFSection:CreateToggle({ Text = "Disable Fall Damage", Default = false, Index = "AF_Enabled",
@@ -3258,7 +3202,6 @@ do
             if v then Vars.StartAntiFall() else Vars.StopAntiFall() end
         end })
 
-    -- Movement
     local MovementTab = Window:CreateTab("Movement")
     local MSet = MovementTab:CreateSection("Strafe HvH")
     MSet:CreateToggle({ Text = "Strafe HvH (Window Peek)", Default = false, Index = "Mov_Strafe",
@@ -3275,10 +3218,8 @@ do
     MSet:CreateDropdown({ Text = "Strafe Key Right", Options = {"D", "E", "C", "V"}, Default = "D", Index = "Mov_KeyRight",
         Callback = function(v) if Enum.KeyCode[v] then Settings.Movement.StrafeKeyRight = Enum.KeyCode[v] end end })
 
-    -- EXPLOIT TAB (reemplaza Spin Tab)
     local ExploitTab = Window:CreateTab("Exploit")
     local ExpSet = ExploitTab:CreateSection("Movement")
-
     ExpSet:CreateToggle({ Text = "Spinbot (360 continuo)", Default = false, Index = "Exp_Spinbot",
         Callback = function(v)
             Settings.Exploit.Spinbot = v
@@ -3287,8 +3228,6 @@ do
     ExpSet:CreateSlider({ Text = "Spin Speed (deg/s)", Min = 60, Max = 2880, Default = 720, Index = "Exp_SpinSpeed",
         Callback = function(v) Settings.Exploit.SpinbotSpeed = v end })
     ExpSet:CreateLabel("Gira continuamente aunque camines")
-    ExpSet:CreateLabel("No se atasca como versiones anteriores")
-
     ExpSet:CreateToggle({ Text = "Walkspeed", Default = false, Index = "Exp_Walkspeed",
         Callback = function(v)
             Settings.Exploit.Walkspeed = v
@@ -3296,7 +3235,6 @@ do
         end })
     ExpSet:CreateSlider({ Text = "Walkspeed Value", Min = 16, Max = 300, Default = 16, Index = "Exp_WalkspeedValue",
         Callback = function(v) Settings.Exploit.WalkspeedValue = v end })
-
     ExpSet:CreateToggle({ Text = "JumpPower", Default = false, Index = "Exp_JumpPower",
         Callback = function(v)
             Settings.Exploit.JumpPower = v
@@ -3304,13 +3242,11 @@ do
         end })
     ExpSet:CreateSlider({ Text = "JumpPower Value", Min = 50, Max = 300, Default = 50, Index = "Exp_JumpPowerValue",
         Callback = function(v) Settings.Exploit.JumpPowerValue = v end })
-
     ExpSet:CreateToggle({ Text = "Noclip", Default = false, Index = "Exp_Noclip",
         Callback = function(v)
             Settings.Exploit.Noclip = v
             if v then Vars.StartExploitNoclip() else Vars.StopExploitNoclip() end
         end })
-
     ExpSet:CreateToggle({ Text = "Fly", Default = false, Index = "Exp_Fly",
         Callback = function(v)
             Settings.Exploit.Fly = v
@@ -3319,7 +3255,6 @@ do
     ExpSet:CreateSlider({ Text = "Fly Speed", Min = 10, Max = 300, Default = 50, Index = "Exp_FlySpeed",
         Callback = function(v) Settings.Exploit.FlySpeed = v end })
     ExpSet:CreateLabel("Fly: WASD + Space/LCtrl")
-
     ExpSet:CreateToggle({ Text = "Teleport to Cursor", Default = false, Index = "Exp_TeleportToCursor",
         Callback = function(v)
             Settings.Exploit.TeleportToCursor = v
@@ -3327,7 +3262,6 @@ do
         end })
     ExpSet:CreateLabel("Click izquierdo para teletransportarte")
 
-    -- Utility Tab
     local UtilityTab = Window:CreateTab("Utility")
     local USync = UtilityTab:CreateSection("Sync Booster + FPS Helper")
     USync:CreateToggle({ Text = "Sync Booster (Sync + FPS)", Default = false, Index = "Sync_Enabled",
@@ -3381,7 +3315,6 @@ do
         if Window.Destroy then Window:Destroy() end
     end)
 
-    -- Panic Key
     Vars.panicConn = UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
         if input.KeyCode == Enum.KeyCode.End then
@@ -3550,7 +3483,7 @@ do
     task.delay(1.0, function()
         if _env.TownUI_Window then
             pcall(function()
-                _env.TownUI_Window:Notify("Town Complete v9.6.2", "RightShift = Menu | Y = Helper | End = Panic", 6, "Success")
+                _env.TownUI_Window:Notify("Town Complete v9.6.3", "RightShift = Menu | Y = Helper | End = Panic", 6, "Success")
             end)
         end
     end)
