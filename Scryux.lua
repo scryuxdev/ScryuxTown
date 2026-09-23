@@ -1,7 +1,7 @@
 --!strict
 -- ============================================================
--- Town Complete v9.8.1 (Scryux UI) - Parte 1/3
--- FIX: Stack overflow en GetCamera
+-- Town Complete v9.8.3 (Scryux UI) - Parte 1/3
+-- Fixes: HumanoidStateType.Dying, UI mejorada, HUD Adonis
 -- ============================================================
 
 local _env = getgenv and getgenv() or _G
@@ -54,7 +54,7 @@ do
         "https://raw.githubusercontent.com/player2dwhite-tech/Scryux-Library/main/Scryux-Library.lua",
     }
     local CACHE_FILE = "scryux_ui_cache.lua"
-    local CACHE_VERSION = "v9.8.1"
+    local CACHE_VERSION = "v9.8.3"
 
     local function SafeRequest(url)
         if Has("request") then
@@ -151,7 +151,6 @@ do
 
     local LP = Players.LocalPlayer
     local Workspace = workspace
-    -- ✅ GetCamera definida UNA SOLA VEZ aquí (versión original)
     local function GetCamera() return Workspace.CurrentCamera end
 
     Vars.Players = Players
@@ -297,6 +296,14 @@ do
     Vars.lastESPUpdate = 0
     Vars.lastSkeletonUpdate = 0
 
+    -- UI elements
+    Vars.HudBackground = nil
+    Vars.HudLabel = nil
+    Vars.HudAccent = nil
+
+    -- ============================================================
+    -- CONFIGURACIÓN
+    -- ============================================================
     Settings = {
         ESP = {
             Enabled = true, Chams = true, TeamCheck = false,
@@ -420,7 +427,7 @@ do
             CrosshairGap = 4,
         },
         Sync = { Enabled = false, TryFFlagFallback = false, AutoDisableOnLowFPS = false },
-        HUD = { Enabled = true, ShowFPS = true, ShowPing = true, Position = "TopRight" },
+        HUD = { Enabled = true, ShowFPS = true, ShowPing = true, Position = "BottomCenter" },
         Performance = { ESPUpdateRate = 0.03, SkeletonUpdateRate = 0.04 },
         UI = { ShowScreenBar = true },
         AntiFall = { Enabled = false },
@@ -472,8 +479,6 @@ do
     local os_clock = Vars.os_clock
     local string_find = Vars.string_find
 
-    -- ✅ FIX: solo referencia local, NO sobrescribir Vars.GetCamera
-    -- (Esto causaba stack overflow porque Vars.GetCamera llamaba a sí misma)
     local GetCamera = Vars.GetCamera
 
     local function IsMenuOpen()
@@ -932,7 +937,6 @@ do
     local string_find = Vars.string_find
     local os_clock = Vars.os_clock
 
-    -- ✅ Referencias locales (NO sobrescriben Vars)
     local GetCamera = Vars.GetCamera
     local IsPassive = Vars.IsPassive
     local CheckVisibility = Vars.CheckVisibility
@@ -982,7 +986,7 @@ do
     Vars.ClearAllSkeletons = ClearAllSkeletons
 
     -- ============================================================
-    -- ESP Pool (compacto - Grok)
+    -- ESP Pool
     -- ============================================================
     local function GetOrCreateESP(name)
         local esp = Vars.ESPPool[name]
@@ -1043,9 +1047,6 @@ do
     end
     Vars.GetOrCreateESP = GetOrCreateESP
 
-    -- ============================================================
-    -- Remove ESP (compacto - Grok)
-    -- ============================================================
     local function RemoveESPForPlayer(name)
         local esp = Vars.ESPPool[name]
         if not esp then return end
@@ -1079,9 +1080,6 @@ do
     end
     Vars.RemoveESPForPlayer = RemoveESPForPlayer
 
-    -- ============================================================
-    -- Clear All ESP (compacto - Grok)
-    -- ============================================================
     local function ClearAllESP()
         for name in pairs(Vars.ESPPool) do
             RemoveESPForPlayer(name)
@@ -1104,9 +1102,6 @@ do
         return Settings.ESP.Colors.Visible
     end
 
-    -- ============================================================
-    -- Update ESP (compacto - Grok)
-    -- ============================================================
     local function UpdateESPForPlayer(player)
         if not player or player == LP then return end
 
@@ -1228,9 +1223,6 @@ do
     end
     Vars.UpdateESPForPlayer = UpdateESPForPlayer
 
-    -- ============================================================
-    -- Update Skeleton (compacto - Grok)
-    -- ============================================================
     local function UpdateSkeletonForPlayer(player)
         if not player or player == LP or not Settings.Skeleton.Enabled then
             ClearSkeletonForPlayer(player and player.Name)
@@ -1314,7 +1306,7 @@ do
     Vars.UpdateSkeletonForPlayer = UpdateSkeletonForPlayer
 
     -- ============================================================
-    -- Items ESP (optimizado - Grok)
+    -- Items ESP
     -- ============================================================
     local ItemESPList = Vars.ItemESPList or {}
     Vars.ItemESPList = ItemESPList
@@ -1432,9 +1424,6 @@ do
         end)
     end
 
-    -- ============================================================
-    -- Rebuild active players
-    -- ============================================================
     local function RebuildActivePlayers()
         Vars.activePlayers = {}
         for _, p in ipairs(Vars.Players:GetPlayers()) do
@@ -1446,9 +1435,6 @@ do
     Vars.RebuildActivePlayers = RebuildActivePlayers
     RebuildActivePlayers()
 
-    -- ============================================================
-    -- Loop unificado ESP + Skeleton
-    -- ============================================================
     Vars.espSkeletonConn = Vars.RunService.RenderStepped:Connect(function()
         if Vars.isScriptUnloaded then return end
 
@@ -1485,7 +1471,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 5: HUD + Eventos + Lighting + Custom FOV + HideBody + Crosshair
+-- BLOQUE 5: HUD estilo Adonis + Eventos + Lighting + Custom FOV + HideBody + Crosshair
 -- ============================================================
 do
     local Players = Vars.Players
@@ -1500,25 +1486,45 @@ do
     local CFrame_new = Vars.CFrame_new
     local math_floor = Vars.math_floor
     local table_insert = Vars.table_insert
+    local table_concat = table.concat
     local os_clock = Vars.os_clock
 
     local GetCamera = Vars.GetCamera
 
+    -- ============================================================
+    -- HUD estilo Adonis (barra inferior)
+    -- ============================================================
+    local HudBackground = Drawing.new("Square")
+    HudBackground.Filled = true
+    HudBackground.Color = Color3.fromRGB(12, 12, 12)
+    HudBackground.Transparency = 0.35
+    HudBackground.Visible = false
+    Vars.HudBackground = HudBackground
+
+    local HudAccentLine = Drawing.new("Line")
+    HudAccentLine.Thickness = 2
+    HudAccentLine.Color = Color3.fromRGB(0, 200, 255)
+    HudAccentLine.Visible = false
+    Vars.HudAccentLine = HudAccentLine
+
     local HudLabel = Drawing.new("Text")
     HudLabel.Visible = false
-    HudLabel.Size = 18
+    HudLabel.Size = 15
     HudLabel.Outline = true
-    HudLabel.Color = Color3.fromRGB(0, 255, 0)
+    HudLabel.Color = Color3.fromRGB(240, 240, 240)
     HudLabel.Font = 2
+    HudLabel.Center = false
     Vars.HudLabel = HudLabel
 
-    local AimModeLabel = Drawing.new("Text")
-    AimModeLabel.Visible = false
-    AimModeLabel.Size = 16
-    AimModeLabel.Outline = true
-    AimModeLabel.Color = Color3.fromRGB(255, 255, 0)
-    AimModeLabel.Font = 2
-    Vars.AimModeLabel = AimModeLabel
+    -- Label secundario para el modo de aim (a la derecha)
+    local HudRightLabel = Drawing.new("Text")
+    HudRightLabel.Visible = false
+    HudRightLabel.Size = 15
+    HudRightLabel.Outline = true
+    HudRightLabel.Color = Color3.fromRGB(255, 220, 0)
+    HudRightLabel.Font = 2
+    HudRightLabel.Center = false
+    Vars.HudRightLabel = HudRightLabel
 
     local cachedFPS = 60
     local cachedPing = 0
@@ -1554,54 +1560,87 @@ do
         if Vars.isScriptUnloaded then return end
         if not Settings.HUD.Enabled then
             HudLabel.Visible = false
-            AimModeLabel.Visible = false
+            HudRightLabel.Visible = false
+            HudBackground.Visible = false
+            HudAccentLine.Visible = false
             return
         end
-        HudLabel.Visible = true
+
         local cam = GetCamera()
-        local text = ""
-        if Settings.HUD.ShowFPS then text = "FPS: " .. cachedFPS end
-        if Settings.HUD.ShowPing then
-            if text ~= "" then text = text .. "\n" end
-            text = text .. "PING: " .. cachedPing .. "ms"
-        end
-        HudLabel.Text = text
-        if cachedFPS >= 60 then
-            HudLabel.Color = Color3.fromRGB(0, 255, 0)
-        elseif cachedFPS >= 30 then
-            HudLabel.Color = Color3.fromRGB(255, 255, 0)
-        else
-            HudLabel.Color = Color3.fromRGB(255, 0, 0)
-        end
-        local pos = Settings.HUD.Position
-        if pos == "TopRight" then
-            HudLabel.Position = V2(cam.ViewportSize.X - 120, 20)
-            AimModeLabel.Position = V2(cam.ViewportSize.X - 220, 60)
-        elseif pos == "TopLeft" then
-            HudLabel.Position = V2(20, 20)
-            AimModeLabel.Position = V2(20, 60)
-        elseif pos == "BottomRight" then
-            HudLabel.Position = V2(cam.ViewportSize.X - 120, cam.ViewportSize.Y - 80)
-            AimModeLabel.Position = V2(cam.ViewportSize.X - 220, cam.ViewportSize.Y - 120)
-        elseif pos == "BottomLeft" then
-            HudLabel.Position = V2(20, cam.ViewportSize.Y - 80)
-            AimModeLabel.Position = V2(20, cam.ViewportSize.Y - 120)
+        if not cam then return end
+        local viewport = cam.ViewportSize
+
+        -- Construir texto izquierdo
+        local leftParts = {
+            "PING " .. cachedPing .. "ms",
+            "FPS " .. cachedFPS,
+        }
+
+        -- Target
+        if Vars.TargetManager then
+            local t = Vars.TargetManager:GetCurrentTarget()
+            if t and t.player then
+                table_insert(leftParts, "TARGET " .. t.player.Name)
+            else
+                table_insert(leftParts, "TARGET None")
+            end
         end
 
+        -- Hotkeys
+        table_insert(leftParts, "MENU " .. Settings.Hotkeys.ToggleMenu.Name)
+
+        local leftText = table_concat(leftParts, "  |  ")
+
+        -- Texto derecho: modo aim
+        local rightText = ""
         if Settings.Aimbot.Enabled then
             local mode = Settings.Aimbot.AimPartMode
             if mode == "Selective FOV" then
-                AimModeLabel.Text = "AIM: Selective (" .. (Vars.currentSelectivePartName or "?") .. ")"
-                AimModeLabel.Visible = true
+                local partName = Vars.currentSelectivePartName or "Auto"
+                rightText = "AIM Selective (" .. partName .. ")"
             elseif mode == "Hybrid" then
-                AimModeLabel.Text = "AIM: Hybrid (" .. (Vars.currentHybridPartName or "Head") .. ")"
-                AimModeLabel.Visible = true
+                local partName = Vars.currentHybridPartName or "Head"
+                rightText = "AIM Hybrid (" .. partName .. ")"
             else
-                AimModeLabel.Text = "AIM: " .. mode
-                AimModeLabel.Visible = true
+                rightText = "AIM " .. mode
             end
+        end
+
+        -- Color según FPS
+        if cachedFPS >= 60 then
+            HudLabel.Color = Color3.fromRGB(0, 255, 120)
+        elseif cachedFPS >= 30 then
+            HudLabel.Color = Color3.fromRGB(255, 220, 0)
         else
-            AimModeLabel.Visible = false
+            HudLabel.Color = Color3.fromRGB(255, 60, 60)
+        end
+
+        HudLabel.Text = leftText
+        HudRightLabel.Text = rightText
+
+        -- Barra abajo
+        local barHeight = 24
+        local barY = viewport.Y - barHeight - 6
+        local barX = 8
+        local barWidth = viewport.X - 16
+
+        HudBackground.Size = V2(barWidth, barHeight)
+        HudBackground.Position = V2(barX, barY)
+        HudBackground.Visible = true
+
+        HudAccentLine.From = V2(barX, barY)
+        HudAccentLine.To = V2(barX + barWidth, barY)
+        HudAccentLine.Color = HudLabel.Color
+        HudAccentLine.Visible = true
+
+        HudLabel.Position = V2(barX + 12, barY + 4)
+        HudLabel.Visible = true
+
+        if rightText ~= "" then
+            HudRightLabel.Position = V2(barX + barWidth - 230, barY + 4)
+            HudRightLabel.Visible = true
+        else
+            HudRightLabel.Visible = false
         end
     end)
 
@@ -1639,7 +1678,7 @@ do
     end
 
     -- ============================================================
-    -- Visuals / Lighting (mejorado - Grok)
+    -- Visuals / Lighting
     -- ============================================================
     local function SaveOriginalLighting()
         if Vars.OriginalLighting then return end
@@ -1903,7 +1942,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 6: Bullet Tracers (mejorado - Grok) + No Recoil + X-Ray
+-- BLOQUE 6: Bullet Tracers + No Recoil + X-Ray
 -- ============================================================
 do
     local RunService = Vars.RunService
@@ -1919,9 +1958,6 @@ do
 
     local GetCamera = Vars.GetCamera
 
-    -- ============================================================
-    -- Tracers mejorados (Grok)
-    -- ============================================================
     local function AcquireTracer()
         local t = table_remove(Vars.TracerPool)
         if t then
@@ -2040,7 +2076,7 @@ do
     StartTracerLoop()
 
     -- ============================================================
-    -- No Recoil unificado
+    -- No Recoil
     -- ============================================================
     local noRecoilCache = {}
 
@@ -2263,7 +2299,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 7: Target Manager + Aimbot (con FOV Selectivo) + Aim Assist
+-- BLOQUE 7: Target Manager + Aimbot + Aim Assist
 -- ============================================================
 do
     local RunService = Vars.RunService
@@ -2279,7 +2315,6 @@ do
     local table_insert = Vars.table_insert
     local os_clock = Vars.os_clock
 
-    -- ✅ Referencias locales (NO sobrescriben Vars)
     local GetCamera = Vars.GetCamera
     local IsMenuOpen = Vars.IsMenuOpen
     local CheckVisibility = Vars.CheckVisibility
@@ -2355,9 +2390,6 @@ do
     end
     Vars.GetNearestBodyPart = GetNearestBodyPart
 
-    -- ============================================================
-    -- Target Manager
-    -- ============================================================
     local TargetManager = {}
     local currentTarget = nil
 
@@ -2458,6 +2490,9 @@ do
         return candidates
     end
 
+    -- ============================================================
+    -- FIX: ValidateTarget sin Enum.HumanoidStateType.Dying
+    -- ============================================================
     function TargetManager:ValidateTarget(player)
         if not player or player == LP then return false end
         if IsDeadBlacklisted(player.Name) then return false end
@@ -2470,17 +2505,24 @@ do
             return false
         end
         local state = hum:GetState()
+        -- ✅ FIX: solo Dead y Physics (Dying no existe en este Enum)
         if state == Enum.HumanoidStateType.Dead
-            or state == Enum.HumanoidStateType.Dying
             or state == Enum.HumanoidStateType.Physics then
             AddToDeadBlacklist(player.Name)
             return false
         end
-        if not char.Parent or char.Parent ~= Vars.Workspace then
+        -- Validar HRP
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then
             AddToDeadBlacklist(player.Name)
             return false
         end
-        if not char:FindFirstChild("HumanoidRootPart") then
+        -- Validar Ragdoll
+        if state == Enum.HumanoidStateType.Ragdoll then
+            AddToDeadBlacklist(player.Name)
+            return false
+        end
+        if not char.Parent or char.Parent ~= Vars.Workspace then
             AddToDeadBlacklist(player.Name)
             return false
         end
@@ -2575,9 +2617,6 @@ do
 
     Vars.TargetManager = TargetManager
 
-    -- ============================================================
-    -- Anti-360
-    -- ============================================================
     local function CheckAnti360()
         if not Settings.Aimbot.Anti360.Enabled then
             Vars.anti360Active = false
@@ -2631,9 +2670,6 @@ do
     end
     Vars.CheckAnti360 = CheckAnti360
 
-    -- ============================================================
-    -- Main Aimbot Loop
-    -- ============================================================
     local lastFrameTime = 0
     local function MainAimbotLoop()
         if Vars.isScriptUnloaded or not Settings.Aimbot.Enabled then return end
@@ -2819,9 +2855,6 @@ do
 
     Vars.aimbotConn = RunService.RenderStepped:Connect(MainAimbotLoop)
 
-    -- ============================================================
-    -- FOV Circle del Aimbot
-    -- ============================================================
     local fovCircle = nil
     Vars.fovConn = RunService.RenderStepped:Connect(function()
         if Vars.isScriptUnloaded then return end
@@ -2843,9 +2876,6 @@ do
     end)
     Vars.GetFOVCircle = function() return fovCircle end
 
-    -- ============================================================
-    -- Indicador de target
-    -- ============================================================
     local targetIndicator = nil
     Vars.targetIndicatorConn = RunService.RenderStepped:Connect(function()
         if Vars.isScriptUnloaded then return end
@@ -2872,9 +2902,6 @@ do
     end)
     Vars.GetTargetIndicator = function() return targetIndicator end
 
-    -- ============================================================
-    -- Hotkeys configurables
-    -- ============================================================
     Vars.aimKeyBeganConn = UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
         if input.KeyCode == Settings.Hotkeys.Helper then
@@ -3506,24 +3533,55 @@ do
 end
 
 -- ============================================================
--- BLOQUE 9: UI de Scryux (SIN CreateLabel - v9.8.2)
+-- BLOQUE 9: UI de Scryux (mejorada estilo Bloxstrap)
 -- ============================================================
 do
     local Settings = Vars.Settings
     local table_insert = Vars.table_insert
     local UserInputService = Vars.UserInputService
 
+    -- ============================================================
+    -- Ventana principal (mejorada visualmente)
+    -- ============================================================
     local Window = ScryuxUI:CreateWindow({
-        Title = "Town Complete v9.8.2",
-        Size = UDim2.new(0, 720, 0, 640),
+        Title = "Town Complete v9.8.3",
+        Size = UDim2.new(0, 780, 0, 660),
         Keybind = Settings.Hotkeys.ToggleMenu,
-        Theme = "Default",
-        Acrylic = false,
+        Theme = "Dark",           -- Tema oscuro estilo Bloxstrap
+        Acrylic = true,           -- Blur si está soportado
         SaveFolder = "TownComplete_Settings/" .. tostring(game.PlaceId),
         FloatingIcon = true,
+        -- Propiedades extendidas (ignoradas si no están soportadas)
+        SearchBar = false,        -- Desactivar search
+        ShowSearch = false,       -- Alternativa
+        Draggable = true,         -- Permitir arrastrar
+        Resizable = true,         -- Permitir redimensionar
+        CornerRadius = 8,         -- Bordes redondeados
+        Shadow = true,            -- Sombra
+        Transparency = 0.95,      -- Transparencia
     })
     _env.TownUI_Window = Window
     Vars.Window = Window
+
+    -- Helper: Botón cíclico para opciones tipo dropdown
+    local function CreateCycleButton(section, text, options, getCurrent, setCurrent, index)
+        if not section or not section.CreateButton then return end
+        local buttonText = text .. ": " .. tostring(getCurrent())
+        section:CreateButton(buttonText, function()
+            local current = tostring(getCurrent())
+            local idx = 1
+            for i, v in ipairs(options) do
+                if tostring(v) == current then idx = i; break end
+            end
+            idx = idx % #options + 1
+            setCurrent(options[idx])
+            if Window.Notify then
+                pcall(function()
+                    Window:Notify("Aimbot", text .. ": " .. tostring(options[idx]), 1.5, "Info")
+                end)
+            end
+        end)
+    end
 
     -- ============================================================
     -- TAB: ESP
@@ -3673,16 +3731,28 @@ do
         Callback = function(v) Settings.Aimbot.RequireGun = v end })
     ASet:CreateSlider({ Text = "Max Distance", Min = 50, Max = 2000, Default = 500, Index = "Aim_MaxDist",
         Callback = function(v) Settings.Aimbot.MaxDistance = v end })
-    ASet:CreateDropdown({ Text = "Aim Key Type", Options = {"Mouse","Key"}, Default = "Mouse", Index = "Aim_KeyType",
-        Callback = function(v) Settings.Aimbot.AimKeyType = v end })
+
+    -- ✅ FIX: Botón cíclico para Aim Key Type (dropdown no funcionaba)
+    CreateCycleButton(ASet, "Aim Key Type", {"Mouse", "Key"}, function()
+        return Settings.Aimbot.AimKeyType
+    end, function(v)
+        Settings.Aimbot.AimKeyType = v
+    end, "Aim_KeyType")
+
     ASet:CreateDropdown({ Text = "Aim Key", Options = {"T","Q","E","R","F","G","Z","X","C","V"}, Default = "T", Index = "Aim_Key",
         Callback = function(v) if Enum.KeyCode[v] then Settings.Aimbot.AimKey = Enum.KeyCode[v] end end })
-    ASet:CreateDropdown({ Text = "Mouse Button", Options = {"Left","Right","Middle"}, Default = "Right", Index = "Aim_MouseBtn",
-        Callback = function(v)
-            if v == "Left" then Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton1
-            elseif v == "Right" then Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton2
-            else Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton3 end
-        end })
+
+    -- ✅ FIX: Botón cíclico para Mouse Button
+    CreateCycleButton(ASet, "Mouse Button", {"Right", "Left", "Middle"}, function()
+        if Settings.Aimbot.AimMouseButton == Enum.UserInputType.MouseButton1 then return "Left"
+        elseif Settings.Aimbot.AimMouseButton == Enum.UserInputType.MouseButton2 then return "Right"
+        else return "Middle" end
+    end, function(v)
+        if v == "Left" then Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton1
+        elseif v == "Right" then Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton2
+        else Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton3 end
+    end, "Aim_MouseBtn")
+
     ASet:CreateSlider({ Text = "FOV", Min = 1, Max = 360, Default = 180, Index = "Aim_FOV",
         Callback = function(v) Settings.Aimbot.FOV = v end })
     ASet:CreateToggle({ Text = "Show FOV Circle", Default = false, Index = "Aim_ShowFOV",
@@ -3741,9 +3811,9 @@ do
         if t then
             Vars.TargetManager:AddToWhitelist(t.player)
             local state = Vars.TargetManager:IsWhitelisted(t.player) and "añadido" or "removido"
-            Window:Notify("Whitelist", t.player.Name .. " " .. state, 2, "Info")
+            if Window.Notify then Window:Notify("Whitelist", t.player.Name .. " " .. state, 2, "Info") end
         else
-            Window:Notify("Whitelist", "Sin target actual", 2, "Warning")
+            if Window.Notify then Window:Notify("Whitelist", "Sin target actual", 2, "Warning") end
         end
     end)
 
@@ -3823,7 +3893,7 @@ do
         Callback = function(v) Vars.setNoSunRays(v) end })
     VLight:CreateButton("Reset All Visuals", function()
         if Vars.ResetAllVisuals then Vars.ResetAllVisuals() end
-        Window:Notify("Visuals", "Reset aplicado", 2, "Success")
+        if Window.Notify then Window:Notify("Visuals", "Reset aplicado", 2, "Success") end
     end)
 
     local VFOV = VisualsTab:CreateSection("Camera")
@@ -3988,17 +4058,18 @@ do
         Callback = function(v) Settings.Sync.TryFFlagFallback = v end })
 
     local UHUD = UtilityTab:CreateSection("HUD")
-    UHUD:CreateToggle({ Text = "HUD (FPS / Ping)", Default = true, Index = "HUD_Enabled",
+    UHUD:CreateToggle({ Text = "HUD (FPS / Ping / Target / Menu)", Default = true, Index = "HUD_Enabled",
         Callback = function(v)
             Settings.HUD.Enabled = v
-            if not v and Vars.HudLabel then Vars.HudLabel.Visible = false end
+            if not v then
+                if Vars.HudLabel then Vars.HudLabel.Visible = false end
+                if Vars.HudRightLabel then Vars.HudRightLabel.Visible = false end
+                if Vars.HudBackground then Vars.HudBackground.Visible = false end
+                if Vars.HudAccentLine then Vars.HudAccentLine.Visible = false end
+            end
         end })
-    UHUD:CreateToggle({ Text = "Show FPS", Default = true, Index = "HUD_ShowFPS",
-        Callback = function(v) Settings.HUD.ShowFPS = v end })
-    UHUD:CreateToggle({ Text = "Show Ping", Default = true, Index = "HUD_ShowPing",
-        Callback = function(v) Settings.HUD.ShowPing = v end })
-    UHUD:CreateDropdown({ Text = "HUD Position", Options = {"TopRight", "TopLeft", "BottomRight", "BottomLeft"}, Default = "TopRight", Index = "HUD_Position",
-        Callback = function(v) Settings.HUD.Position = v end })
+    -- ✅ Eliminados los dropdowns de HUD Position, ShowFPS y ShowPing
+    -- (el HUD ahora está fijo abajo estilo Adonis)
 
     local UPerf = UtilityTab:CreateSection("Performance")
     UPerf:CreateSlider({ Text = "ESP Update Rate (s)", Min = 0.01, Max = 0.2, Default = 0.03, Index = "Perf_ESPRate",
@@ -4011,14 +4082,14 @@ do
         if Window.GetSaveManager then
             local sm = Window:GetSaveManager()
             sm:Save("default")
-            Window:Notify("Config", "Guardado", 2, "Success")
+            if Window.Notify then Window:Notify("Config", "Guardado", 2, "Success") end
         end
     end)
     UConfig:CreateButton("Cargar", function()
         if Window.GetSaveManager then
             local sm = Window:GetSaveManager()
             sm:Load("default")
-            Window:Notify("Config", "Cargado", 2, "Success")
+            if Window.Notify then Window:Notify("Config", "Cargado", 2, "Success") end
         end
     end)
 
@@ -4089,7 +4160,9 @@ do
             end
             Vars.StopXRay()
             if Vars.HudLabel then Vars.HudLabel.Visible = false end
-            if Vars.AimModeLabel then Vars.AimModeLabel.Visible = false end
+            if Vars.HudRightLabel then Vars.HudRightLabel.Visible = false end
+            if Vars.HudBackground then Vars.HudBackground.Visible = false end
+            if Vars.HudAccentLine then Vars.HudAccentLine.Visible = false end
             if _env.TownUI_Window then
                 pcall(function()
                     _env.TownUI_Window:Notify("Panic", "Todo desactivado (End)", 3, "Warning")
@@ -4171,7 +4244,9 @@ do
             pcall(function() Vars.aimAssistFOVCircle:Remove() end)
         end
         if Vars.HudLabel then pcall(function() Vars.HudLabel:Remove() end) end
-        if Vars.AimModeLabel then pcall(function() Vars.AimModeLabel:Remove() end) end
+        if Vars.HudRightLabel then pcall(function() Vars.HudRightLabel:Remove() end) end
+        if Vars.HudBackground then pcall(function() Vars.HudBackground:Remove() end) end
+        if Vars.HudAccentLine then pcall(function() Vars.HudAccentLine:Remove() end) end
 
         Vars.stickyTarget = nil
         Vars.stickyLastSeen = 0
@@ -4213,7 +4288,7 @@ do
         if _env.TownUI_Window then
             pcall(function()
                 _env.TownUI_Window:Notify(
-                    "Town Complete v9.8.2",
+                    "Town Complete v9.8.3",
                     "RightShift = Menu | Y = Helper | End = Panic",
                     6, "Success"
                 )
