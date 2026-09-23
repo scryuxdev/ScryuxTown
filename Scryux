@@ -1,12 +1,35 @@
 --!strict
 -- ============================================================
--- Town Complete v9.6.3 (Scryux UI) - Parte 1/3
+-- Town Complete v9.7.0 (Scryux UI) - Parte 1/3
+-- FOV Selectivo + Mejoras de Rivals
 -- ============================================================
 
 local _env = getgenv and getgenv() or _G
 local realPrint = print
 local realWarn  = warn
+
+-- ============================================================
+-- BLOQUE 0: Logger con niveles (no silencia todo)
+-- ============================================================
+local Logger = {
+    level = "WARN", -- DEBUG, INFO, WARN, ERROR
+    prefix = "[TownComplete] ",
+    levels = {DEBUG = 1, INFO = 2, WARN = 3, ERROR = 4},
+}
+function Logger.Log(level, ...)
+    if Logger.levels[level] < Logger.levels[Logger.level] then return end
+    local args = {...}
+    local parts = {}
+    for i = 1, #args do parts[i] = tostring(args[i]) end
+    realPrint(Logger.prefix .. "[" .. level .. "] " .. table.concat(parts, " "))
+end
+function Logger.Debug(...) Logger.Log("DEBUG", ...) end
+function Logger.Info(...)  Logger.Log("INFO", ...) end
+function Logger.Warn(...)  Logger.Log("WARN", ...) end
+function Logger.Error(...) Logger.Log("ERROR", ...) end
+
 local function _noop() end
+-- Silenciamos print/warn del juego pero conservamos realPrint para el logger
 _env.print = _noop
 _env.warn  = _noop
 
@@ -32,6 +55,7 @@ do
         "https://raw.githubusercontent.com/player2dwhite-tech/Scryux-Library/main/Scryux-Library.lua",
     }
     local CACHE_FILE = "scryux_ui_cache.lua"
+    local CACHE_VERSION = "v9.7.0"
 
     local function SafeRequest(url)
         if Has("request") then
@@ -60,6 +84,12 @@ do
         if not ok or not exists then return nil end
         local ok2, cached = pcall(readfile, CACHE_FILE)
         if not ok2 or not cached or #cached < 2000 then return nil end
+        -- Verificar versión de caché
+        if not cached:find(CACHE_VERSION, 1, true) then
+            Logger.Info("Caché de Scryux obsoleto, recargando...")
+            if type(delfile) == "function" then pcall(delfile, CACHE_FILE) end
+            return nil
+        end
         if not IsValidUI(cached) then
             if type(delfile) == "function" then pcall(delfile, CACHE_FILE) end
             return nil
@@ -80,7 +110,9 @@ do
         local ok, lib = pcall(fn)
         if ok and lib then
             if type(writefile) == "function" then
-                pcall(writefile, CACHE_FILE, code)
+                -- Inyectar versión en el caché
+                local codeWithVersion = "-- " .. CACHE_VERSION .. "\n" .. code
+                pcall(writefile, CACHE_FILE, codeWithVersion)
             end
             return lib
         end
@@ -100,7 +132,7 @@ end
 if not ScryuxUI then
     _env.print = realPrint
     _env.warn  = realWarn
-    warn("[TownComplete] No se pudo cargar Scryux UI")
+    Logger.Error("No se pudo cargar Scryux UI")
     return
 end
 
@@ -110,6 +142,7 @@ end
 local Vars = {}
 local Settings = {}
 local BODY_PARTS_ALL = {}
+
 do
     local Players          = game:GetService("Players")
     local RunService       = game:GetService("RunService")
@@ -139,6 +172,7 @@ do
     Vars.math_floor = math.floor
     Vars.math_clamp = math.clamp
     Vars.math_max = math.max
+    Vars.math_min = math.min
     Vars.math_rad = math.rad
     Vars.math_tan = math.tan
     Vars.table_insert = table.insert
@@ -156,7 +190,10 @@ do
     Vars.anti360Active = false
     Vars.anti360Cooldown = 0
     Vars.currentTargetForAnti360 = nil
+
+    -- helperMousePosition ahora se actualiza cada frame
     Vars.helperMousePosition = Vector2.new(0, 0)
+    Vars.lastMouseUpdate = 0
 
     Vars.noRecoilRunning = false
     Vars.noRecoilConnections = {}
@@ -172,6 +209,7 @@ do
     Vars.SharedRayParams = RaycastParams.new()
     Vars.SharedRayParams.FilterType = Enum.RaycastFilterType.Blacklist
     Vars.SharedIgnoreList = {}
+    Vars.SharedIgnoreListOwner = nil -- nombre del target para el que se construyó
 
     Vars.highlightCooldowns = {}
 
@@ -235,6 +273,8 @@ do
 
     Vars.CrosshairLines = {}
     Vars.CrosshairConn = nil
+    Vars.CrosshairRayParams = RaycastParams.new()
+    Vars.CrosshairRayParams.FilterType = Enum.RaycastFilterType.Blacklist
 
     Vars.exploitWalkspeedConn = nil
     Vars.exploitJumpConn = nil
@@ -245,6 +285,17 @@ do
     Vars.exploitFlyKeyEndConn = nil
     Vars.exploitTeleportConn = nil
 
+    -- Historial de posiciones para backtrack (idea de Rivals)
+    Vars.positionHistory = {} -- [playerName] = { {pos, time}, ... }
+    Vars.POS_HISTORY_MAX = 20
+    Vars.POS_HISTORY_TTL = 0.2
+
+    Vars.currentSelectivePartName = nil
+    Vars.currentHybridPartName = nil
+
+    -- ============================================================
+    -- CONFIGURACIÓN
+    -- ============================================================
     Settings = {
         ESP = {
             Enabled = true, Chams = true, TeamCheck = false,
@@ -294,12 +345,71 @@ do
             AimMouseButton = Enum.UserInputType.MouseButton2,
             FOV = 180, ShowFOV = false,
             FOVColor = Color3.fromRGB(255,255,255), FOVThickness = 2,
-            AimPartMode = "Auto (Nearest to Crosshair)",
+
+            -- NUEVO: Modo de selección de parte
+            -- "Auto (Nearest to Crosshair)", "Fixed Head", "Fixed Torso",
+            -- "Selective FOV" (nuevo modo natural), "Hybrid" (fixed + bajar)
+            AimPartMode = "Selective FOV",
+
+            -- Configuración del FOV Selectivo
+            Selective = {
+                Enabled = true,
+                -- Zonas verticales (0 = top del FOV, 1 = bottom del FOV)
+                HeadZoneTop = 0.0,
+                HeadZoneBottom = 0.35,
+                TorsoZoneTop = 0.35,
+                TorsoZoneBottom = 0.70,
+                LegsZoneTop = 0.70,
+                LegsZoneBottom = 1.0,
+                -- Zonas horizontales (0 = left, 1 = right)
+                LeftArmZoneLeft = 0.0,
+                LeftArmZoneRight = 0.35,
+                CenterZoneLeft = 0.35,
+                CenterZoneRight = 0.65,
+                RightArmZoneLeft = 0.65,
+                RightArmZoneRight = 1.0,
+                -- Suavizado del cambio de parte (0 = instantáneo, 1 = muy suave)
+                TransitionSmoothing = 0.85,
+                -- Deadzone para evitar cambios constantes
+                DeadzoneRadius = 0.05,
+            },
+
+            -- Configuración del modo Híbrido
+            Hybrid = {
+                Enabled = false,
+                -- Parte base cuando el mouse está quieto en el centro
+                BasePart = "Head",
+                -- Si el mouse baja más de este % del FOV, cambia a la siguiente parte
+                VerticalBiasThreshold = 0.15,
+                -- Suavizado al bajar
+                DownwardSmoothness = 0.7,
+                -- Permitir volver a subir
+                AllowReturn = true,
+            },
+
             HelperSmoothness = 0.15, BaseSmoothness = 0.15,
             UsePrediction = false, PredictionAmount = 0.13,
+            UsePingPrediction = false, -- NUEVO: predicción por ping
             Priority = "Distance",
             StickyLock = false, StickyTimeout = 2,
             RequireGun = true,
+
+            -- Bone priority (idea de Rivals)
+            BonePriority = {
+                Head = 1.0,
+                UpperTorso = 0.7,
+                LowerTorso = 0.6,
+                HumanoidRootPart = 0.5,
+                LeftUpperArm = 0.35,
+                RightUpperArm = 0.35,
+                LeftLowerArm = 0.25,
+                RightLowerArm = 0.25,
+                LeftUpperLeg = 0.3,
+                RightUpperLeg = 0.3,
+                LeftLowerLeg = 0.2,
+                RightLowerLeg = 0.2,
+            },
+
             Anti360 = { Enabled = false, DetectionDistance = 1.5, Hysteresis = 1.5, ReEnableDelay = 0.25 }
         },
         AimAssist = {
@@ -309,6 +419,9 @@ do
             TeamCheck = false, IgnorePassive = true, WallCheck = false,
             Visible = true, UseMouse = false, Priority = "Distance",
             UsePrediction = false, PredictionAmount = 0.13,
+            UsePingPrediction = false,
+            -- NUEVO: Aim Assist selectivo también
+            Selective = false,
         },
         WeaponMods = { NoRecoil = false },
         Visuals = {
@@ -346,13 +459,26 @@ do
             FlySpeed = 50,
             TeleportToCursor = false,
         },
+        -- NUEVO: Hotkeys configurables
+        Hotkeys = {
+            ToggleMenu = Enum.KeyCode.RightShift,
+            Helper = Enum.KeyCode.Y,
+            Panic = Enum.KeyCode.End,
+        },
+        -- NUEVO: Backtrack
+        Backtrack = {
+            Enabled = false,
+            Delay = 0.1, -- segundos atrás
+            ShowIndicator = false,
+        },
     }
 
     Vars.Settings = Settings
 
     BODY_PARTS_ALL = {
-        "Auto (Nearest to Crosshair)", "Head",
-        "UpperTorso", "LowerTorso", "Torso", "HumanoidRootPart",
+        "Auto (Nearest to Crosshair)", "Head", "Torso",
+        "Selective FOV", "Hybrid",
+        "UpperTorso", "LowerTorso", "HumanoidRootPart",
         "LeftUpperArm", "LeftLowerArm", "LeftHand",
         "RightUpperArm", "RightLowerArm", "RightHand",
         "LeftUpperLeg", "LeftLowerLeg", "LeftFoot",
@@ -375,6 +501,8 @@ do
     local table_insert = Vars.table_insert
     local os_clock = Vars.os_clock
     local string_find = Vars.string_find
+    local math_min = Vars.math_min
+    local math_max = Vars.math_max
 
     local function GetCamera() return Vars.GetCamera() end
     Vars.GetCamera = GetCamera
@@ -441,28 +569,41 @@ do
         return false
     end
 
+    -- ============================================================
+    -- Reconstruir SharedIgnoreList cuando cambia el target
+    -- ============================================================
+    local function RebuildIgnoreList(targetPlayer)
+        local ignore = {}
+        if LP.Character then
+            for _, p in ipairs(LP.Character:GetDescendants()) do
+                if p:IsA("BasePart") then table_insert(ignore, p) end
+            end
+        end
+        if targetPlayer and targetPlayer.Character then
+            for _, p in ipairs(targetPlayer.Character:GetDescendants()) do
+                if p:IsA("BasePart") then table_insert(ignore, p) end
+            end
+        end
+        local cam = GetCamera()
+        if cam then table_insert(ignore, cam) end
+        Vars.SharedIgnoreList = ignore
+        Vars.SharedRayParams.FilterDescendantsInstances = ignore
+        Vars.SharedIgnoreListOwner = targetPlayer and targetPlayer.Name or nil
+    end
+    Vars.RebuildIgnoreList = RebuildIgnoreList
+
     local function CheckPositionVisibility(position, player, ignoreTransparent, ignoreNonCollidable)
         local cam = GetCamera()
+        if not cam then return "hidden" end
         local camPos = cam.CFrame.Position
         local dir = (position - camPos).Unit
         local dist = (position - camPos).Magnitude
-        local params = Vars.SharedRayParams
-        if #Vars.SharedIgnoreList == 0 then
-            local ignore = {}
-            if LP.Character then
-                for _, p in ipairs(LP.Character:GetDescendants()) do
-                    if p:IsA("BasePart") then table_insert(ignore, p) end
-                end
-            end
-            if player and player.Character then
-                for _, p in ipairs(player.Character:GetDescendants()) do
-                    if p:IsA("BasePart") then table_insert(ignore, p) end
-                end
-            end
-            if cam then table_insert(ignore, cam) end
-            Vars.SharedIgnoreList = ignore
-            Vars.SharedRayParams.FilterDescendantsInstances = ignore
+        -- Reconstruir ignore list si cambió el target
+        local targetName = player and player.Name or nil
+        if Vars.SharedIgnoreListOwner ~= targetName then
+            RebuildIgnoreList(player)
         end
+        local params = Vars.SharedRayParams
         local hits = {}
         local origin = camPos
         local remaining = dist
@@ -588,6 +729,263 @@ do
         return nil
     end
     Vars.GetBonesForRig = GetBonesForRig
+
+    -- ============================================================
+    -- NUEVO: Predicción con aceleración + ping (idea de Rivals)
+    -- ============================================================
+    local function PredictPosition(part, amount, usePing)
+        if not part then return nil end
+        local pos = part.Position
+        local vel = part.AssemblyLinearVelocity or V3(0,0,0)
+        local acc = part.AssemblyLinearAcceleration or V3(0,0,0)
+        local totalAmount = amount
+        if usePing then
+            local ping = 0
+            pcall(function()
+                ping = Vars.Stats.Network.ServerStatsItem["Data Ping"]:GetValue() / 1000
+            end)
+            totalAmount = totalAmount + ping * 0.5
+        end
+        -- p = p0 + v*t + 0.5*a*t²
+        return pos + vel * totalAmount + 0.5 * acc * totalAmount * totalAmount
+    end
+    Vars.PredictPosition = PredictPosition
+
+    -- ============================================================
+    -- NUEVO: Sistema de FOV Selectivo
+    -- ============================================================
+    -- Dado un punto en pantalla (screenPos) y el centro del FOV,
+    -- devuelve qué parte del cuerpo debe apuntarse según la zona.
+    local function GetSelectiveBodyPart(player, screenPos, fovCenter, fovRadius)
+        if not player or not player.Character then return nil end
+        local char = player.Character
+        local cam = GetCamera()
+        if not cam then return nil end
+        local cfg = Settings.Aimbot.Selective
+        local rigType = GetRigType(char)
+        if not rigType then return nil end
+
+        -- Vector del mouse relativo al centro del FOV
+        local delta = V2(screenPos.X - fovCenter.X, screenPos.Y - fovCenter.Y)
+        local distFromCenter = delta.Magnitude
+        if distFromCenter < 0.01 then
+            -- Mouse exactamente en el centro: usar Head por defecto
+            return char:FindFirstChild("Head") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+        end
+
+        -- Normalizar: 0 = top, 1 = bottom (Y)
+        -- 0 = left, 1 = right (X)
+        -- Solo consideramos la posición del mouse dentro del FOV
+        local normX = math.clamp((delta.X + fovRadius) / (fovRadius * 2), 0, 1)
+        local normY = math.clamp((delta.Y + fovRadius) / (fovRadius * 2), 0, 1)
+
+        -- Determinar zona vertical
+        local verticalZone = "torso"
+        if normY <= cfg.HeadZoneBottom then
+            verticalZone = "head"
+        elseif normY <= cfg.TorsoZoneBottom then
+            verticalZone = "torso"
+        else
+            verticalZone = "legs"
+        end
+
+        -- Determinar zona horizontal (solo para brazos si estamos en zona torso)
+        local horizontalZone = "center"
+        if normX <= cfg.LeftArmZoneRight then
+            horizontalZone = "left"
+        elseif normX >= cfg.RightArmZoneLeft then
+            horizontalZone = "right"
+        end
+
+        -- Seleccionar la parte según rig y zonas
+        local partName
+        if rigType == "R15" then
+            if verticalZone == "head" then
+                partName = "Head"
+            elseif verticalZone == "torso" then
+                if horizontalZone == "left" then
+                    partName = "LeftUpperArm"
+                elseif horizontalZone == "right" then
+                    partName = "RightUpperArm"
+                else
+                    partName = "UpperTorso"
+                end
+            else -- legs
+                if horizontalZone == "left" then
+                    partName = "LeftUpperLeg"
+                elseif horizontalZone == "right" then
+                    partName = "RightUpperLeg"
+                else
+                    partName = "LowerTorso"
+                end
+            end
+        else -- R6
+            if verticalZone == "head" then
+                partName = "Head"
+            elseif verticalZone == "torso" then
+                if horizontalZone == "left" then
+                    partName = "Left Arm"
+                elseif horizontalZone == "right" then
+                    partName = "Right Arm"
+                else
+                    partName = "Torso"
+                end
+            else -- legs
+                if horizontalZone == "left" then
+                    partName = "Left Leg"
+                elseif horizontalZone == "right" then
+                    partName = "Right Leg"
+                else
+                    partName = "Torso" -- fallback
+                end
+            end
+        end
+
+        local part = char:FindFirstChild(partName)
+        if not part then
+            part = char:FindFirstChild("Head") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+        end
+        return part
+    end
+    Vars.GetSelectiveBodyPart = GetSelectiveBodyPart
+
+    -- ============================================================
+    -- NUEVO: Modo Híbrido (fixed + bajar lentamente)
+    -- ============================================================
+    local hybridState = {
+        currentPart = "Head",
+        lastChange = 0,
+    }
+    local function GetHybridBodyPart(player, screenPos, fovCenter, fovRadius)
+        if not player or not player.Character then return nil end
+        local char = player.Character
+        local cfg = Settings.Aimbot.Hybrid
+        local now = os_clock()
+
+        -- Vector del mouse relativo al centro
+        local delta = V2(screenPos.X - fovCenter.X, screenPos.Y - fovCenter.Y)
+        local normY = (delta.Y + fovRadius) / (fovRadius * 2)
+        normY = math.clamp(normY, 0, 1)
+
+        -- Lógica: si el mouse baja más del threshold, bajamos de parte
+        local targetPart = cfg.BasePart
+        if normY > 0.5 + cfg.VerticalBiasThreshold then
+            -- Mouse abajo: bajar a Torso
+            targetPart = "UpperTorso"
+        end
+        if normY > 0.75 + cfg.VerticalBiasThreshold then
+            -- Mouse muy abajo: bajar a Legs
+            targetPart = "LowerTorso"
+        end
+        if not cfg.AllowReturn and normY < 0.5 then
+            -- No permitir volver a subir
+            targetPart = hybridState.currentPart
+        end
+
+        -- Suavizar el cambio
+        if targetPart ~= hybridState.currentPart then
+            if (now - hybridState.lastChange) > 0.15 then
+                hybridState.currentPart = targetPart
+                hybridState.lastChange = now
+            else
+                targetPart = hybridState.currentPart
+            end
+        end
+
+        local part = char:FindFirstChild(targetPart)
+        if not part then
+            -- Fallback a R6
+            local r6Map = {
+                UpperTorso = "Torso",
+                LowerTorso = "Torso",
+            }
+            part = char:FindFirstChild(r6Map[targetPart] or targetPart)
+        end
+        if not part then
+            part = char:FindFirstChild("Head") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+        end
+        return part
+    end
+    Vars.GetHybridBodyPart = GetHybridBodyPart
+
+    -- ============================================================
+    -- NUEVO: Bone priority (idea de Rivals)
+    -- ============================================================
+    local function GetBestBodyPartByPriority(player, cam)
+        if not player or not player.Character then return nil end
+        local char = player.Character
+        if not cam then cam = GetCamera() end
+        if not cam then return nil end
+        local center = V2(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
+        local best, bestScore = nil, math.huge
+        local priorities = Settings.Aimbot.BonePriority
+        for partName, priority in pairs(priorities) do
+            local part = char:FindFirstChild(partName)
+            if part and part:IsA("BasePart") then
+                local sp, onScreen = cam:WorldToViewportPoint(part.Position)
+                if onScreen then
+                    local dist = (V2(sp.X, sp.Y) - center).Magnitude
+                    -- Score más bajo = mejor (distancia baja, prioridad alta)
+                    local score = dist / math.max(priority, 0.01)
+                    if score < bestScore then
+                        bestScore = score
+                        best = part
+                    end
+                end
+            end
+        end
+        return best
+    end
+    Vars.GetBestBodyPartByPriority = GetBestBodyPartByPriority
+
+    -- ============================================================
+    -- NUEVO: Backtrack (historial de posiciones)
+    -- ============================================================
+    local function UpdatePositionHistory()
+        local now = os_clock()
+        for _, p in ipairs(Vars.activePlayers) do
+            if not p.Character then continue end
+            local root = p.Character:FindFirstChild("HumanoidRootPart")
+            if not root then continue end
+            Vars.positionHistory[p.Name] = Vars.positionHistory[p.Name] or {}
+            table.insert(Vars.positionHistory[p.Name], 1, {
+                pos = root.Position,
+                time = now,
+                cframe = root.CFrame,
+            })
+            -- Limitar tamaño
+            while #Vars.positionHistory[p.Name] > Vars.POS_HISTORY_MAX do
+                table.remove(Vars.positionHistory[p.Name])
+            end
+            -- Limpiar viejos
+            while #Vars.positionHistory[p.Name] > 0
+                and (now - Vars.positionHistory[p.Name][#Vars.positionHistory[p.Name]].time) > Vars.POS_HISTORY_TTL do
+                table.remove(Vars.positionHistory[p.Name])
+            end
+        end
+    end
+    Vars.UpdatePositionHistory = UpdatePositionHistory
+
+    local function GetBacktrackPosition(playerName, delay)
+        local hist = Vars.positionHistory[playerName]
+        if not hist or #hist == 0 then return nil end
+        local targetTime = os_clock() - delay
+        for _, entry in ipairs(hist) do
+            if entry.time <= targetTime then
+                return entry.pos, entry.cframe
+            end
+        end
+        return hist[#hist].pos, hist[#hist].cframe
+    end
+    Vars.GetBacktrackPosition = GetBacktrackPosition
+
+    -- Loop de historial (se activa/desactiva según Settings.Backtrack.Enabled)
+    Vars.posHistoryConn = Vars.RunService.Heartbeat:Connect(function()
+        if Vars.isScriptUnloaded then return end
+        if Settings.Backtrack.Enabled then
+            Vars.UpdatePositionHistory()
+        end
+    end)
 end
 
 -- ============================================================
@@ -614,7 +1012,9 @@ do
     local function GetRigType(c) return Vars.GetRigType(c) end
     local function GetBonesForRig(r) return Vars.GetBonesForRig(r) end
 
+    -- ============================================================
     -- Skeleton line pool
+    -- ============================================================
     local function AcquireSkeletonLine()
         local line = table_remove(Vars.SkeletonLinePool)
         if line then line.Visible = false; return line end
@@ -651,7 +1051,9 @@ do
     end
     Vars.ClearAllSkeletons = ClearAllSkeletons
 
+    -- ============================================================
     -- ESP pool
+    -- ============================================================
     local function GetOrCreateESP(playerName)
         local esp = Vars.ESPPool[playerName]
         if esp then return esp end
@@ -951,6 +1353,9 @@ do
     end
     Vars.UpdateSkeletonForPlayer = UpdateSkeletonForPlayer
 
+    -- ============================================================
+    -- Items ESP
+    -- ============================================================
     local function IsItemPart(part)
         if not part or not part:IsA("BasePart") then return false end
         local name = part.Name:lower()
@@ -968,6 +1373,7 @@ do
         if not part or not part.Parent then return end
         if not Settings.ESP.Items or not Settings.ESP.Enabled then return end
         if not IsItemPart(part) then return end
+        if Vars.ItemESPList[part] then return end
         local label = Drawing.new("Text")
         label.Size = Settings.ESP.ItemTextSize
         label.Center = true
@@ -1017,7 +1423,7 @@ do
                     label.Visible = false
                 end
             else
-                label:Remove()
+                pcall(function() label:Remove() end)
                 Vars.ItemESPList[part] = nil
             end
         end
@@ -1037,6 +1443,9 @@ do
         end
     end)
 
+    -- ============================================================
+    -- Rebuild active players
+    -- ============================================================
     local function RebuildActivePlayers()
         Vars.activePlayers = {}
         for _, p in ipairs(Vars.Players:GetPlayers()) do
@@ -1046,7 +1455,11 @@ do
         end
     end
     Vars.RebuildActivePlayers = RebuildActivePlayers
+    RebuildActivePlayers()
 
+    -- ============================================================
+    -- Loops de ESP y Skeleton (con rate limiting)
+    -- ============================================================
     local lastESPUpdate = 0
     local lastSkeletonUpdate = 0
 
@@ -1072,8 +1485,6 @@ do
             Vars.SilentPcall(UpdateSkeletonForPlayer, player)
         end
     end)
-
-    RebuildActivePlayers()
 end
 
 -- ============================================================
@@ -1103,6 +1514,15 @@ do
     HudLabel.Color = Color3.fromRGB(0, 255, 0)
     HudLabel.Font = 2
     Vars.HudLabel = HudLabel
+
+    -- HUD extra: estado del aimbot (modo selectivo)
+    local AimModeLabel = Drawing.new("Text")
+    AimModeLabel.Visible = false
+    AimModeLabel.Size = 16
+    AimModeLabel.Outline = true
+    AimModeLabel.Color = Color3.fromRGB(255, 255, 0)
+    AimModeLabel.Font = 2
+    Vars.AimModeLabel = AimModeLabel
 
     local cachedFPS = 60
     local cachedPing = 0
@@ -1138,6 +1558,7 @@ do
         if Vars.isScriptUnloaded then return end
         if not Settings.HUD.Enabled then
             HudLabel.Visible = false
+            AimModeLabel.Visible = false
             return
         end
         HudLabel.Visible = true
@@ -1159,12 +1580,33 @@ do
         local pos = Settings.HUD.Position
         if pos == "TopRight" then
             HudLabel.Position = V2(cam.ViewportSize.X - 120, 20)
+            AimModeLabel.Position = V2(cam.ViewportSize.X - 220, 60)
         elseif pos == "TopLeft" then
             HudLabel.Position = V2(20, 20)
+            AimModeLabel.Position = V2(20, 60)
         elseif pos == "BottomRight" then
             HudLabel.Position = V2(cam.ViewportSize.X - 120, cam.ViewportSize.Y - 80)
+            AimModeLabel.Position = V2(cam.ViewportSize.X - 220, cam.ViewportSize.Y - 120)
         elseif pos == "BottomLeft" then
             HudLabel.Position = V2(20, cam.ViewportSize.Y - 80)
+            AimModeLabel.Position = V2(20, cam.ViewportSize.Y - 120)
+        end
+
+        -- Mostrar modo de aim actual
+        if Settings.Aimbot.Enabled then
+            local mode = Settings.Aimbot.AimPartMode
+            if mode == "Selective FOV" then
+                AimModeLabel.Text = "AIM: Selective (" .. (Vars.currentSelectivePartName or "?") .. ")"
+                AimModeLabel.Visible = true
+            elseif mode == "Hybrid" then
+                AimModeLabel.Text = "AIM: Hybrid (" .. (Vars.currentHybridPartName or "Head") .. ")"
+                AimModeLabel.Visible = true
+            else
+                AimModeLabel.Text = "AIM: " .. mode
+                AimModeLabel.Visible = true
+            end
+        else
+            AimModeLabel.Visible = false
         end
     end)
 
@@ -1177,6 +1619,7 @@ do
         Vars.ClearSkeletonForPlayer(p.Name)
         Vars.visibilityCache[p.Name] = nil
         Vars.highlightCooldowns[p.Name] = nil
+        Vars.positionHistory[p.Name] = nil
         Vars.RebuildActivePlayers()
     end)
 
@@ -1185,6 +1628,10 @@ do
         Vars.ClearAllSkeletons()
         Vars.ClearAllESP()
         Vars.isLocalDead = false
+        -- Reconstruir ignore list
+        if Vars.RebuildIgnoreList then
+            Vars.RebuildIgnoreList(nil)
+        end
     end)
 
     Vars.localDiedConn = nil
@@ -1197,6 +1644,9 @@ do
         end
     end
 
+    -- ============================================================
+    -- Lighting helpers
+    -- ============================================================
     local function setFullBright(v)
         Lighting.Brightness = v and 3 or 1
         Lighting.FogEnd = v and 99999 or 1000
@@ -1250,6 +1700,9 @@ do
     end
     Vars.setCustomFOV = setCustomFOV
 
+    -- ============================================================
+    -- HideBody
+    -- ============================================================
     local HIDE_BODY_PARTS = {
         "UpperTorso", "LowerTorso", "Torso",
         "LeftUpperArm", "LeftLowerArm", "RightUpperArm", "RightLowerArm",
@@ -1307,6 +1760,9 @@ do
     end
     Vars.StopHideBody = StopHideBody
 
+    -- ============================================================
+    -- Crosshair (reutilizando RaycastParams global)
+    -- ============================================================
     local function CreateCrosshairLines()
         for _, line in ipairs(Vars.CrosshairLines) do
             pcall(function() line:Remove() end)
@@ -1334,14 +1790,13 @@ do
         local center = V2(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
 
         local isEnemy = false
-        local rayParams = RaycastParams.new()
-        rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+        -- Reutilizar RaycastParams global
         local ignore = {}
         if LP.Character then table_insert(ignore, LP.Character) end
         if cam then table_insert(ignore, cam) end
-        rayParams.FilterDescendantsInstances = ignore
+        Vars.CrosshairRayParams.FilterDescendantsInstances = ignore
         local ray = cam:ViewportPointToRay(center.X, center.Y)
-        local result = Vars.Workspace:Raycast(ray.Origin, ray.Direction * 1000, rayParams)
+        local result = Vars.Workspace:Raycast(ray.Origin, ray.Direction * 1000, Vars.CrosshairRayParams)
         if result and result.Instance then
             local hitChar = result.Instance:FindFirstAncestorOfClass("Model")
             if hitChar and hitChar ~= LP.Character then
@@ -1410,6 +1865,9 @@ do
 
     local function GetCamera() return Vars.GetCamera() end
 
+    -- ============================================================
+    -- Tracers
+    -- ============================================================
     local function AcquireTracer()
         local t = table_remove(Vars.TracerPool)
         if t then t.Visible = false; return t end
@@ -1505,6 +1963,9 @@ do
 
     StartTracerLoop()
 
+    -- ============================================================
+    -- No Recoil (UNIFICADO en un solo Heartbeat - idea de Rivals)
+    -- ============================================================
     local noRecoilCache = {}
 
     local function RebuildNoRecoilCache()
@@ -1538,106 +1999,67 @@ do
         end
     end
 
-    local function StartNoRecoil()
-        if Vars.noRecoilRunning then return end
-        Vars.noRecoilRunning = true
-        RebuildNoRecoilCache()
-        table_insert(Vars.noRecoilConnections, LP.CharacterAdded:Connect(RebuildNoRecoilCache))
-        if LP.Backpack then
-            table_insert(Vars.noRecoilConnections, LP.Backpack.ChildAdded:Connect(RebuildNoRecoilCache))
-        end
-        local c1 = RunService.Heartbeat:Connect(function()
-            if not Vars.noRecoilRunning then return end
-            pcall(function()
-                local r = LP:FindFirstChild("Recoil")
-                if r then
-                    for _, c in ipairs(r:GetDescendants()) do
-                        if c:IsA("CFrameValue") then c.Value = CFrame.new()
-                        elseif c:IsA("NumberValue") then c.Value = 0 end
-                    end
+    -- UNA SOLA conexión Heartbeat que hace TODO
+    local function NoRecoilTick()
+        if not Vars.noRecoilRunning then return end
+        pcall(function()
+            -- 1. Recoil folder
+            local r = LP:FindFirstChild("Recoil")
+            if r then
+                for _, c in ipairs(r:GetDescendants()) do
+                    if c:IsA("CFrameValue") then c.Value = CFrame.new()
+                    elseif c:IsA("NumberValue") then c.Value = 0 end
                 end
-            end)
-        end)
-        table_insert(Vars.noRecoilConnections, c1)
-        local c2 = RunService.Heartbeat:Connect(function()
-            if not Vars.noRecoilRunning then return end
-            pcall(function()
-                local char = LP.Character
-                if not char then return end
+                local a = r:FindFirstChild("CurrentRecoil")
+                local b = r:FindFirstChild("CurrentRecoil2")
+                local cc = r:FindFirstChild("CurrentRecoil3")
+                if a and a:IsA("CFrameValue") then a.Value = CFrame.new() end
+                if b and b:IsA("CFrameValue") then b.Value = CFrame.new() end
+                if cc and cc:IsA("NumberValue") then cc.Value = 0 end
+            end
+            -- 2. GUNAIMVALUE
+            local char = LP.Character
+            if char then
                 local gav = char:FindFirstChild("GUNAIMVALUE")
                 if gav then
                     for _, c in ipairs(gav:GetChildren()) do
                         if c:IsA("NumberValue") then c.Value = 0 end
                     end
                 end
-            end)
-        end)
-        table_insert(Vars.noRecoilConnections, c2)
-        local c3 = RunService.Heartbeat:Connect(function()
-            if not Vars.noRecoilRunning then return end
-            pcall(function()
-                for _, s in ipairs(noRecoilCache) do
-                    if s and s.Parent then s.Value = 0 end
-                end
-            end)
-        end)
-        table_insert(Vars.noRecoilConnections, c3)
-        local c4 = RunService.RenderStepped:Connect(function()
-            if not Vars.noRecoilRunning then return end
-            pcall(function()
-                local r = LP:FindFirstChild("Recoil")
-                if r then
-                    local a = r:FindFirstChild("CurrentRecoil")
-                    local b = r:FindFirstChild("CurrentRecoil2")
-                    local cc = r:FindFirstChild("CurrentRecoil3")
-                    if a and a:IsA("CFrameValue") then a.Value = CFrame.new() end
-                    if b and b:IsA("CFrameValue") then b.Value = CFrame.new() end
-                    if cc and cc:IsA("NumberValue") then cc.Value = 0 end
-                end
-            end)
-        end)
-        table_insert(Vars.noRecoilConnections, c4)
-        local c5 = RunService.Heartbeat:Connect(function()
-            if not Vars.noRecoilRunning then return end
-            pcall(function()
-                local char = LP.Character
-                if not char then return end
+            end
+            -- 3. Cache
+            for _, s in ipairs(noRecoilCache) do
+                if s and s.Parent then s.Value = 0 end
+            end
+            -- 4. Animaciones de fuego/recoil
+            if char then
                 local hum = char:FindFirstChildOfClass("Humanoid")
-                if not hum then return end
-                for _, t in ipairs(hum:GetPlayingAnimationTracks()) do
-                    if not t.Animation then continue end
-                    local low = (t.Animation.Name or ""):lower()
-                    if low:find("fire") or low:find("recoil") or low:find("aim") then
-                        t:AdjustSpeed(999)
+                if hum then
+                    for _, t in ipairs(hum:GetPlayingAnimationTracks()) do
+                        if t.Animation then
+                            local low = (t.Animation.Name or ""):lower()
+                            if low:find("fire") or low:find("recoil") or low:find("aim") then
+                                t:AdjustSpeed(999)
+                            end
+                        end
                     end
                 end
-            end)
-        end)
-        table_insert(Vars.noRecoilConnections, c5)
-        local c6 = RunService.Heartbeat:Connect(function()
-            if not Vars.noRecoilRunning then return end
-            pcall(function()
-                local char = LP.Character
-                if not char then return end
+                -- 5. Tools equipadas
                 for _, tool in ipairs(char:GetChildren()) do
-                    if not tool:IsA("Tool") then continue end
-                    for n, v in pairs({
-                        GunRecoil=0, GunRecoilX=0, RecoilAngle=0,
-                        RecoilSpread=0, RecoilStrength=0, AimSway=0
-                    }) do
-                        local e = tool:FindFirstChild(n)
-                        if not e then
-                            local nv = Instance.new("NumberValue")
-                            nv.Name = n; nv.Value = v; nv.Parent = tool
-                        else e.Value = v end
+                    if tool:IsA("Tool") then
+                        for n, v in pairs({
+                            GunRecoil=0, GunRecoilX=0, RecoilAngle=0,
+                            RecoilSpread=0, RecoilStrength=0, AimSway=0
+                        }) do
+                            local e = tool:FindFirstChild(n)
+                            if not e then
+                                local nv = Instance.new("NumberValue")
+                                nv.Name = n; nv.Value = v; nv.Parent = tool
+                            else e.Value = v end
+                        end
                     end
                 end
-            end)
-        end)
-        table_insert(Vars.noRecoilConnections, c6)
-        local c7 = RunService.Heartbeat:Connect(function()
-            if not Vars.noRecoilRunning then return end
-            pcall(function()
+                -- 6. AttachmentFolder scan
                 local function scanForSights(parent)
                     if not parent then return end
                     for _, ch in ipairs(parent:GetChildren()) do
@@ -1663,10 +2085,22 @@ do
                     end
                 end
                 scanForSights(LP.Backpack)
-                if LP.Character then scanForSights(LP.Character) end
-            end)
+                scanForSights(char)
+            end
         end)
-        table_insert(Vars.noRecoilConnections, c7)
+    end
+
+    local function StartNoRecoil()
+        if Vars.noRecoilRunning then return end
+        Vars.noRecoilRunning = true
+        RebuildNoRecoilCache()
+        table_insert(Vars.noRecoilConnections, LP.CharacterAdded:Connect(RebuildNoRecoilCache))
+        if LP.Backpack then
+            table_insert(Vars.noRecoilConnections, LP.Backpack.ChildAdded:Connect(RebuildNoRecoilCache))
+        end
+        -- UNA SOLA conexión
+        local conn = RunService.Heartbeat:Connect(NoRecoilTick)
+        table_insert(Vars.noRecoilConnections, conn)
     end
     Vars.StartNoRecoil = StartNoRecoil
 
@@ -1679,6 +2113,9 @@ do
     end
     Vars.StopNoRecoil = StopNoRecoil
 
+    -- ============================================================
+    -- X-Ray
+    -- ============================================================
     local function StartXRay()
         if Vars.xrayThread then return end
         Vars.xrayActive = true
@@ -1757,7 +2194,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 7: Target Manager + Aimbot + Aim Assist
+-- BLOQUE 7: Target Manager + Aimbot (con FOV Selectivo) + Aim Assist
 -- ============================================================
 do
     local RunService = Vars.RunService
@@ -1779,6 +2216,11 @@ do
     local function IsPassive(n) return Vars.IsPassive(n) end
     local function GetRigType(c) return Vars.GetRigType(c) end
     local function hasGunScript(c) return Vars.hasGunScript(c) end
+    local function PredictPosition(p, a, ping) return Vars.PredictPosition(p, a, ping) end
+    local function GetSelectiveBodyPart(p, sp, c, r) return Vars.GetSelectiveBodyPart(p, sp, c, r) end
+    local function GetHybridBodyPart(p, sp, c, r) return Vars.GetHybridBodyPart(p, sp, c, r) end
+    local function GetBestBodyPartByPriority(p, cam) return Vars.GetBestBodyPartByPriority(p, cam) end
+    local function GetBacktrackPosition(name, delay) return Vars.GetBacktrackPosition(name, delay) end
 
     local BODY_PARTS = {
         "Head", "UpperTorso", "LowerTorso", "Torso", "HumanoidRootPart",
@@ -1843,14 +2285,64 @@ do
     end
     Vars.GetNearestBodyPart = GetNearestBodyPart
 
+    -- ============================================================
+    -- Target Manager
+    -- ============================================================
     local TargetManager = {}
     local currentTarget = nil
+
+    -- Calcula el radio del FOV en píxeles
+    local function ComputeFOVRadius(cam, fovDegrees)
+        if not cam then return 100 end
+        local gf = cam.FieldOfView or 70
+        local half = cam.ViewportSize.X / 2
+        return half * math_tan(math_rad(fovDegrees / 2)) / math_tan(math_rad(gf / 2))
+    end
+    Vars.ComputeFOVRadius = ComputeFOVRadius
+
+    -- Resuelve la parte del cuerpo según el modo de aim
+    local function ResolveAimPart(player, cam, fovCenter, fovRadius)
+        local char = player.Character
+        if not char then return nil end
+        local mode = Settings.Aimbot.AimPartMode
+
+        if mode == "Auto (Nearest to Crosshair)" then
+            return GetNearestBodyPart(player)
+        elseif mode == "Selective FOV" then
+            local sp = Vars.helperMousePosition
+            local part = GetSelectiveBodyPart(player, sp, fovCenter, fovRadius)
+            Vars.currentSelectivePartName = part and part.Name or nil
+            return part
+        elseif mode == "Hybrid" then
+            local sp = Vars.helperMousePosition
+            local part = GetHybridBodyPart(player, sp, fovCenter, fovRadius)
+            Vars.currentHybridPartName = part and part.Name or nil
+            return part
+        elseif mode == "Head" then
+            return char:FindFirstChild("Head") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+        elseif mode == "Torso" then
+            return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("Head")
+        else
+            -- Parte específica
+            local part = char:FindFirstChild(mode)
+            if not part then
+                part = char:FindFirstChild("Head") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+            end
+            return part
+        end
+    end
+    Vars.ResolveAimPart = ResolveAimPart
 
     function TargetManager:GetCandidates()
         local candidates = {}
         if not LP.Character then return candidates end
         local lr = LP.Character:FindFirstChild("HumanoidRootPart")
         if not lr then return candidates end
+        local cam = GetCamera()
+        if not cam then return candidates end
+        local fovCenter = Vars.helperMousePosition
+        local fovRadius = ComputeFOVRadius(cam, Settings.Aimbot.FOV)
+
         for _, player in ipairs(Vars.activePlayers) do
             if IsWhitelisted(player) then continue end
             if IsDeadBlacklisted(player.Name) then continue end
@@ -1865,39 +2357,40 @@ do
                 if Settings.Aimbot.StrictWallCheck and vis ~= "visible" then continue end
                 if vis == "hidden" then continue end
             end
-            local aimPart
-            if Settings.Aimbot.AimPartMode == "Auto (Nearest to Crosshair)" then
-                aimPart = GetNearestBodyPart(player)
-            else
-                aimPart = player.Character:FindFirstChild(Settings.Aimbot.AimPartMode)
-                if not aimPart then
-                    aimPart = player.Character:FindFirstChild("Head")
-                        or player.Character:FindFirstChild("HumanoidRootPart")
+
+            -- Resolver parte según modo
+            local aimPart = ResolveAimPart(player, cam, fovCenter, fovRadius)
+            if not aimPart then continue end
+
+            local tp = aimPart.Position
+
+            -- Backtrack (idea de Rivals)
+            if Settings.Backtrack.Enabled then
+                local bp = GetBacktrackPosition(player.Name, Settings.Backtrack.Delay)
+                if bp then
+                    tp = bp
                 end
             end
-            if not aimPart then continue end
-            local tp = aimPart.Position
+
+            -- Predicción
             if Settings.Aimbot.UsePrediction then
                 local root = player.Character:FindFirstChild("HumanoidRootPart")
-                if root and root.Velocity then
-                    tp = tp + root.Velocity * Settings.Aimbot.PredictionAmount
+                if root then
+                    tp = PredictPosition(root, Settings.Aimbot.PredictionAmount, Settings.Aimbot.UsePingPrediction)
                 end
             end
-            local sp, onScreen = GetCamera():WorldToViewportPoint(tp)
+
+            local sp, onScreen = cam:WorldToViewportPoint(tp)
             if not onScreen then continue end
-            local center = Vars.helperMousePosition
-            local gameFOV = GetCamera().FieldOfView or 70
-            local vs = GetCamera().ViewportSize
-            local half = vs.X / 2
-            local radius = half * math_tan(math_rad(Settings.Aimbot.FOV / 2)) / math_tan(math_rad(gameFOV / 2))
-            local dc = (V2(sp.X, sp.Y) - center).Magnitude
-            if dc > radius then continue end
+            local dc = (V2(sp.X, sp.Y) - fovCenter).Magnitude
+            if dc > fovRadius then continue end
             if Settings.Aimbot.Anti360.Enabled and Vars.anti360Active and Vars.currentTargetForAnti360 == player then
                 continue
             end
             table_insert(candidates, {
                 player = player, part = aimPart, targetPos = tp,
                 distance = dist, screenDist = dc, screenPos = sp,
+                aimPartName = aimPart.Name,
             })
         end
         return candidates
@@ -1947,7 +2440,18 @@ do
         local pr = Settings.Aimbot.Priority or "Distance"
         local best, bs = nil, math.huge
         for _, x in ipairs(c) do
-            local s = (pr == "Distance") and x.distance or x.screenDist
+            local s
+            if pr == "Distance" then
+                s = x.distance
+            elseif pr == "FOV" then
+                s = x.screenDist
+            elseif pr == "Priority" then
+                -- Bone priority: score = screenDist / priority
+                local prio = Settings.Aimbot.BonePriority[x.aimPartName] or 0.5
+                s = x.screenDist / math.max(prio, 0.01)
+            else
+                s = x.distance
+            end
             if s < bs then bs = s; best = x end
         end
         return best
@@ -1978,22 +2482,21 @@ do
         if Settings.Aimbot.MaxDistance > 0 and d > Settings.Aimbot.MaxDistance then
             self:ClearTarget(); return
         end
-        local aimPart
-        if Settings.Aimbot.AimPartMode == "Auto (Nearest to Crosshair)" then
-            aimPart = GetNearestBodyPart(currentTarget.player)
-        else
-            aimPart = currentTarget.player.Character:FindFirstChild(Settings.Aimbot.AimPartMode)
-            if not aimPart then
-                aimPart = currentTarget.player.Character:FindFirstChild("Head")
-                    or currentTarget.player.Character:FindFirstChild("HumanoidRootPart")
-            end
-        end
+        local cam = GetCamera()
+        local fovCenter = Vars.helperMousePosition
+        local fovRadius = ComputeFOVRadius(cam, Settings.Aimbot.FOV)
+        local aimPart = ResolveAimPart(currentTarget.player, cam, fovCenter, fovRadius)
         if not aimPart then self:ClearTarget(); return end
         currentTarget.part = aimPart
         currentTarget.targetPos = aimPart.Position
+        currentTarget.aimPartName = aimPart.Name
     end
 
-    function TargetManager:ClearTarget() currentTarget = nil end
+    function TargetManager:ClearTarget()
+        currentTarget = nil
+        Vars.currentSelectivePartName = nil
+        Vars.currentHybridPartName = nil
+    end
     function TargetManager:GetCurrentTarget() return currentTarget end
 
     function TargetManager:AddToWhitelist(player)
@@ -2011,6 +2514,9 @@ do
 
     Vars.TargetManager = TargetManager
 
+    -- ============================================================
+    -- Anti-360
+    -- ============================================================
     local function CheckAnti360()
         if not Settings.Aimbot.Anti360.Enabled then
             Vars.anti360Active = false
@@ -2064,6 +2570,9 @@ do
     end
     Vars.CheckAnti360 = CheckAnti360
 
+    -- ============================================================
+    -- Main Aimbot Loop
+    -- ============================================================
     local lastFrameTime = 0
     local function MainAimbotLoop()
         if Vars.isScriptUnloaded or not Settings.Aimbot.Enabled then return end
@@ -2076,10 +2585,15 @@ do
                 return
             end
         end
+
+        -- ACTUALIZAR helperMousePosition cada frame (FIX crítico)
+        Vars.helperMousePosition = UserInputService:GetMouseLocation()
+
         local now = os_clock()
         local dt = now - lastFrameTime
         lastFrameTime = now
         if dt > 0.5 then dt = 0.5 end
+
         local held
         if Settings.Aimbot.AimKeyType == "Key" then held = Vars.aimKeyHeld
         else held = UserInputService:IsMouseButtonPressed(Settings.Aimbot.AimMouseButton) end
@@ -2087,15 +2601,19 @@ do
             Vars.targetTransition.active = false
             return
         end
-        if CheckAnti360() then
+
+        if Vars.CheckAnti360() then
             TargetManager:ClearTarget()
             Vars.targetTransition.active = false
             return
         end
-        if Settings.Aimbot.StickyLock and currentTarget and currentTarget.player then
-            local stillValid = TargetManager:ValidateTarget(currentTarget.player)
+
+        -- Sticky lock
+        if Settings.Aimbot.StickyLock and TargetManager:GetCurrentTarget() then
+            local ct = TargetManager:GetCurrentTarget()
+            local stillValid = TargetManager:ValidateTarget(ct.player)
             if stillValid then
-                Vars.stickyTarget = currentTarget.player
+                Vars.stickyTarget = ct.player
                 Vars.stickyLastSeen = now
             else
                 if (now - Vars.stickyLastSeen) > Settings.Aimbot.StickyTimeout then
@@ -2106,22 +2624,31 @@ do
         elseif not Settings.Aimbot.StickyLock then
             Vars.stickyTarget = nil
         end
+
         TargetManager:UpdateTarget()
+
+        -- Sticky target override
         if Settings.Aimbot.StickyLock and Vars.stickyTarget and Vars.stickyTarget.Character then
             local stHum = Vars.stickyTarget.Character:FindFirstChildOfClass("Humanoid")
             if stHum and stHum.Health > 0 then
-                local stPart = Vars.stickyTarget.Character:FindFirstChild("Head")
-                    or Vars.stickyTarget.Character:FindFirstChild("HumanoidRootPart")
+                local cam = GetCamera()
+                local fovCenter = Vars.helperMousePosition
+                local fovRadius = ComputeFOVRadius(cam, Settings.Aimbot.FOV)
+                local stPart = ResolveAimPart(Vars.stickyTarget, cam, fovCenter, fovRadius)
                 if stPart then
-                    currentTarget = {
+                    TargetManager:LockTarget({
                         player = Vars.stickyTarget, part = stPart, targetPos = stPart.Position,
                         distance = 0, screenDist = 0, screenPos = V2(0, 0),
-                    }
+                        aimPartName = stPart.Name,
+                    })
                 end
             end
         end
-        if currentTarget and currentTarget.player ~= Vars.targetTransition.previousPlayer then
-            local aimPos = currentTarget.part and currentTarget.part.Position or nil
+
+        -- Transición al cambiar target
+        local ct = TargetManager:GetCurrentTarget()
+        if ct and ct.player ~= Vars.targetTransition.previousPlayer then
+            local aimPos = ct.part and ct.part.Position or nil
             if aimPos then
                 local cam = GetCamera()
                 Vars.targetTransition.active = true
@@ -2129,11 +2656,13 @@ do
                 Vars.targetTransition.targetCFrame = CFrame_new(cam.CFrame.Position, aimPos)
                 Vars.targetTransition.progress = 0
                 Vars.targetTransition.duration = Vars.TARGET_TRANSITION_DURATION
-                Vars.targetTransition.previousPlayer = currentTarget.player
+                Vars.targetTransition.previousPlayer = ct.player
             end
-        elseif not currentTarget then
+        elseif not ct then
             Vars.targetTransition.previousPlayer = nil
         end
+
+        -- Buscar nuevo target
         if not TargetManager:GetCurrentTarget() then
             local nt = TargetManager:GetBestTarget()
             if nt then
@@ -2147,9 +2676,10 @@ do
                 Vars.targetTransition.previousPlayer = nt.player
             end
         end
+
         local t = TargetManager:GetCurrentTarget()
         if not t then return end
-        if CheckAnti360() then
+        if Vars.CheckAnti360() then
             TargetManager:ClearTarget()
             Vars.targetTransition.active = false
             return
@@ -2159,6 +2689,8 @@ do
             TargetManager:ClearTarget()
             return
         end
+
+        -- Transición de cámara
         if Vars.targetTransition.active then
             Vars.targetTransition.progress = Vars.targetTransition.progress + (dt / Vars.targetTransition.duration)
             if Vars.targetTransition.progress >= 1 then
@@ -2166,7 +2698,7 @@ do
                 Vars.targetTransition.active = false
             end
             local cam = GetCamera()
-            local eased = 1 - math.pow(1 - Vars.targetTransition.progress, 3)
+            local eased = 1 - (1 - Vars.targetTransition.progress) ^ 3
             local newTargetCF = CFrame_new(cam.CFrame.Position, ap.Position)
             Vars.targetTransition.targetCFrame = newTargetCF
             pcall(function()
@@ -2174,13 +2706,21 @@ do
             end)
             return
         end
+
+        -- Calcular aimPos final
         local aimPos = ap.Position
+        if Settings.Backtrack.Enabled then
+            local bp = GetBacktrackPosition(t.player.Name, Settings.Backtrack.Delay)
+            if bp then aimPos = bp end
+        end
         if Settings.Aimbot.UsePrediction then
             local root = t.player.Character:FindFirstChild("HumanoidRootPart")
-            if root and root.Velocity then
-                aimPos = aimPos + root.Velocity * Settings.Aimbot.PredictionAmount
+            if root then
+                aimPos = PredictPosition(root, Settings.Aimbot.PredictionAmount, Settings.Aimbot.UsePingPrediction)
             end
         end
+
+        -- Suavizado
         local sm = Vars.aimbotHelperActive and Settings.Aimbot.HelperSmoothness or Settings.Aimbot.BaseSmoothness
         local lr = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
         if Settings.Aimbot.Anti360.Enabled and lr then
@@ -2197,6 +2737,7 @@ do
                 end
             end
         end
+
         local cam = GetCamera()
         if Settings.Aimbot.Method == "Camera" then
             if sm >= 1 then return
@@ -2225,8 +2766,12 @@ do
 
     Vars.aimbotConn = RunService.RenderStepped:Connect(MainAimbotLoop)
 
+    -- ============================================================
+    -- FOV Circle del Aimbot (sigue al mouse correctamente)
+    -- ============================================================
     local fovCircle = nil
     Vars.fovConn = RunService.RenderStepped:Connect(function()
+        if Vars.isScriptUnloaded then return end
         if not fovCircle then
             fovCircle = Drawing.new("Circle")
             fovCircle.Filled = false
@@ -2235,9 +2780,7 @@ do
         fovCircle.Visible = Settings.Aimbot.ShowFOV and Settings.Aimbot.Enabled and not IsMenuOpen()
         if fovCircle.Visible then
             local cam = GetCamera()
-            local gf = cam.FieldOfView or 70
-            local half = cam.ViewportSize.X / 2
-            local r = half * math_tan(math_rad(Settings.Aimbot.FOV / 2)) / math_tan(math_rad(gf / 2))
+            local r = ComputeFOVRadius(cam, Settings.Aimbot.FOV)
             local mp = UserInputService:GetMouseLocation()
             fovCircle.Position = V2(mp.X, mp.Y)
             fovCircle.Radius = r
@@ -2247,6 +2790,9 @@ do
     end)
     Vars.GetFOVCircle = function() return fovCircle end
 
+    -- ============================================================
+    -- Indicador de target
+    -- ============================================================
     local targetIndicator = nil
     Vars.targetIndicatorConn = RunService.RenderStepped:Connect(function()
         if Vars.isScriptUnloaded then return end
@@ -2273,14 +2819,17 @@ do
     end)
     Vars.GetTargetIndicator = function() return targetIndicator end
 
+    -- ============================================================
+    -- Hotkeys (configurables)
+    -- ============================================================
     Vars.aimKeyBeganConn = UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
-        if input.KeyCode == Enum.KeyCode.Y then
+        if input.KeyCode == Settings.Hotkeys.Helper then
             Vars.aimbotHelperActive = not Vars.aimbotHelperActive
             if _env.TownUI_Window and _env.TownUI_Window.Notify then
                 pcall(function()
                     _env.TownUI_Window:Notify("Helper",
-                        Vars.aimbotHelperActive and "Aim: Head" or "Aim: Torso",
+                        Vars.aimbotHelperActive and "Aim: Helper mode" or "Aim: Base mode",
                         1.5, "Info")
                 end)
             end
@@ -2292,6 +2841,9 @@ do
         if input.KeyCode == Settings.Aimbot.AimKey then Vars.aimKeyHeld = false end
     end)
 
+    -- ============================================================
+    -- AIM ASSIST
+    -- ============================================================
     local function GetAimAssistTarget()
         if not LP.Character then return nil end
         local lr = LP.Character:FindFirstChild("HumanoidRootPart")
@@ -2299,10 +2851,7 @@ do
         local cam = GetCamera()
         if not cam then return nil end
         local center = Vars.helperMousePosition
-        local gameFOV = cam.FieldOfView or 70
-        local vs = cam.ViewportSize
-        local half = vs.X / 2
-        local radius = half * math_tan(math_rad(Settings.AimAssist.FOV / 2)) / math_tan(math_rad(gameFOV / 2))
+        local radius = ComputeFOVRadius(cam, Settings.AimAssist.FOV)
         local best, bestScore = nil, math.huge
         for _, player in ipairs(Vars.activePlayers) do
             if not player or player == LP then continue end
@@ -2313,12 +2862,19 @@ do
             if not hum or hum.Health <= 0 then continue end
             if Settings.AimAssist.TeamCheck and player.Team == LP.Team then continue end
             if Settings.AimAssist.IgnorePassive and IsPassive(player.Name) then continue end
-            local part = player.Character:FindFirstChild(Settings.AimAssist.AimPart)
-            if not part then
-                part = player.Character:FindFirstChild("Head")
-                    or player.Character:FindFirstChild("HumanoidRootPart")
+
+            local part
+            if Settings.AimAssist.Selective then
+                part = ResolveAimPart(player, cam, center, radius)
+            else
+                part = player.Character:FindFirstChild(Settings.AimAssist.AimPart)
+                if not part then
+                    part = player.Character:FindFirstChild("Head")
+                        or player.Character:FindFirstChild("HumanoidRootPart")
+                end
             end
             if not part then continue end
+
             local tr = player.Character:FindFirstChild("HumanoidRootPart")
             if not tr then continue end
             local dist = (lr.Position - tr.Position).Magnitude
@@ -2328,20 +2884,26 @@ do
                 if Settings.AimAssist.Visible and vis ~= "visible" then continue end
                 if not Settings.AimAssist.Visible and vis == "hidden" then continue end
             end
+
             local targetPos = part.Position
             if Settings.AimAssist.UsePrediction then
-                if tr.Velocity then
-                    targetPos = targetPos + tr.Velocity * Settings.AimAssist.PredictionAmount
-                end
+                targetPos = PredictPosition(tr, Settings.AimAssist.PredictionAmount, Settings.AimAssist.UsePingPrediction)
             end
+            if Settings.Backtrack.Enabled then
+                local bp = GetBacktrackPosition(player.Name, Settings.Backtrack.Delay)
+                if bp then targetPos = bp end
+            end
+
             local sp, onScreen = cam:WorldToViewportPoint(targetPos)
             if not onScreen then continue end
             local dc = (V2(sp.X, sp.Y) - center).Magnitude
             if dc > radius then continue end
+
             local score = (Settings.AimAssist.Priority == "Distance") and dist or dc
             if score < bestScore then
                 bestScore = score
-                best = { player = player, part = part, targetPos = targetPos, distance = dist, screenDist = dc, screenPos = sp }
+                best = { player = player, part = part, targetPos = targetPos,
+                         distance = dist, screenDist = dc, screenPos = sp }
             end
         end
         return best
@@ -2351,15 +2913,20 @@ do
         if Vars.isScriptUnloaded or not Settings.AimAssist.Enabled then return end
         if Vars.isLocalDead or IsMenuOpen() then return end
         if type(isrbxactive) == "function" and not isrbxactive() then return end
+
+        Vars.helperMousePosition = UserInputService:GetMouseLocation()
+
         local now = os_clock()
         local dt = now - Vars.aimAssistLastFrame
         Vars.aimAssistLastFrame = now
         if dt > 0.5 then dt = 0.5 end
+
         local target = GetAimAssistTarget()
         if not target then return end
         local aimPos = target.targetPos
         local sm = Settings.AimAssist.Smoothness
         local cam = GetCamera()
+
         if Settings.AimAssist.UseMouse then
             local sp = cam:WorldToViewportPoint(aimPos)
             local d = V2(sp.X - Vars.helperMousePosition.X, sp.Y - Vars.helperMousePosition.Y)
@@ -2401,9 +2968,7 @@ do
                     and Settings.AimAssist.Enabled and not IsMenuOpen()
                 if Vars.aimAssistFOVCircle.Visible then
                     local cam = GetCamera()
-                    local gf = cam.FieldOfView or 70
-                    local half = cam.ViewportSize.X / 2
-                    local r = half * math_tan(math_rad(Settings.AimAssist.FOV / 2)) / math_tan(math_rad(gf / 2))
+                    local r = ComputeFOVRadius(cam, Settings.AimAssist.FOV)
                     local mp = UserInputService:GetMouseLocation()
                     Vars.aimAssistFOVCircle.Position = V2(mp.X, mp.Y)
                     Vars.aimAssistFOVCircle.Radius = r
@@ -2576,6 +3141,9 @@ do
         end
     end)
 
+    -- ============================================================
+    -- Anti-Fall
+    -- ============================================================
     local function StartAntiFall()
         if Vars.antiFallRunning then return end
         Vars.antiFallRunning = true
@@ -2604,7 +3172,7 @@ do
                 end
                 if startY == nil then startY = r.Position.Y end
                 if startY - r.Position.Y < 6.5 then return end
-                local result = workspace:Raycast(r.Position, V3(0, -300, 0), rayParams)
+                local result = Vars.Workspace:Raycast(r.Position, V3(0, -300, 0), rayParams)
                 if not result then return end
                 r.AssemblyLinearVelocity = V3(0, 0, 0)
                 startY = nil
@@ -2633,6 +3201,9 @@ do
     end
     Vars.StopAntiFall = StopAntiFall
 
+    -- ============================================================
+    -- Strafe HvH
+    -- ============================================================
     local strafeLeftConn = nil
     local strafeLeftEndConn = nil
     local lastPeek = 0
@@ -2684,7 +3255,9 @@ do
         if strafeLeftEndConn then pcall(function() strafeLeftEndConn:Disconnect() end); strafeLeftEndConn = nil end
     end
 
-    -- EXPLOIT: Spinbot FIX (no se atasca al caminar)
+    -- ============================================================
+    -- EXPLOIT: Spinbot (no se atasca al caminar)
+    -- ============================================================
     local lastSpin = 0
     local spinAngle = 0
     Vars.StartExploitSpinbot = function()
@@ -2810,7 +3383,7 @@ do
             local direction = (cam.CFrame.LookVector * (ctrl.F + ctrl.B)
                 + cam.CFrame.RightVector * (ctrl.R + ctrl.L)).Unit
             local vertical = V3(0, (ctrl.U + ctrl.D), 0)
-            root.Velocity = direction * Settings.Exploit.FlySpeed + vertical * Settings.Exploit.FlySpeed
+            root.AssemblyLinearVelocity = direction * Settings.Exploit.FlySpeed + vertical * Settings.Exploit.FlySpeed
         end)
     end
     Vars.StopExploitFly = function()
@@ -2887,9 +3460,9 @@ do
     local table_insert = Vars.table_insert
 
     local Window = ScryuxUI:CreateWindow({
-        Title = "Town Complete v9.6.3",
-        Size = UDim2.new(0, 680, 0, 580),
-        Keybind = Enum.KeyCode.RightShift,
+        Title = "Town Complete v9.7.0",
+        Size = UDim2.new(0, 720, 0, 620),
+        Keybind = Settings.Hotkeys.ToggleMenu,
         Theme = "Default",
         Acrylic = false,
         SaveFolder = "TownComplete_Settings/" .. tostring(game.PlaceId),
@@ -2898,9 +3471,12 @@ do
     _env.TownUI_Window = Window
     Vars.Window = Window
 
+    -- ============================================================
+    -- TAB: ESP
+    -- ============================================================
     local ESPTab = Window:CreateTab("ESP")
     ESPTab:CreateLabel("Keybind: RightShift = Menu | End = Panic | Y = Helper")
-    ESPTab:CreateLabel("Version: v9.6.3")
+    ESPTab:CreateLabel("Version: v9.7.0")
     local ESPMain = ESPTab:CreateSection("ESP")
     ESPMain:CreateToggle({ Text = "ESP Master", Default = true, Index = "ESP_Enabled",
         Callback = function(v) Settings.ESP.Enabled = v end })
@@ -2995,6 +3571,9 @@ do
     ESPChams:CreateToggle({ Text = "Wallcheck Chams ESP", Default = false, Index = "ESP_WallcheckChams",
         Callback = function(v) Settings.ESP.WallcheckChams = v end })
 
+    -- ============================================================
+    -- TAB: Skeleton
+    -- ============================================================
     local SkeletonTab = Window:CreateTab("Skeleton")
     local SkelMain = SkeletonTab:CreateSection("Skeleton ESP")
     SkelMain:CreateToggle({ Text = "Skeleton Master", Default = true, Index = "Skel_Enabled",
@@ -3019,6 +3598,9 @@ do
     SkelMain:CreateToggle({ Text = "Only Visible", Default = false, Index = "Skel_OnlyVisible",
         Callback = function(v) Settings.Skeleton.OnlyVisible = v end })
 
+    -- ============================================================
+    -- TAB: Aimbot
+    -- ============================================================
     local AimbotTab = Window:CreateTab("Aimbot")
     local ASet = AimbotTab:CreateSection("Aimbot")
     ASet:CreateLabel("Keybind: RightShift (abrir) | Y (helper)")
@@ -3026,7 +3608,7 @@ do
         Callback = function(v) Settings.Aimbot.Enabled = v end })
     ASet:CreateDropdown({ Text = "Method", Options = {"Camera","Mouse"}, Default = "Camera", Index = "Aim_Method",
         Callback = function(v) Settings.Aimbot.Method = v end })
-    ASet:CreateDropdown({ Text = "Priority", Options = {"Distance","FOV"}, Default = "Distance", Index = "Aim_Priority",
+    ASet:CreateDropdown({ Text = "Priority", Options = {"Distance","FOV","Priority"}, Default = "Distance", Index = "Aim_Priority",
         Callback = function(v) Settings.Aimbot.Priority = v end })
     ASet:CreateToggle({ Text = "Wall Check", Default = false, Index = "Aim_WallCheck",
         Callback = function(v) Settings.Aimbot.WallCheck = v end })
@@ -3062,18 +3644,54 @@ do
         Callback = function(v) Settings.Aimbot.UsePrediction = v end })
     ASet:CreateSlider({ Text = "Prediction Amount", Min = 0.01, Max = 0.3, Default = 0.13, Index = "Aim_PredAmount",
         Callback = function(v) Settings.Aimbot.PredictionAmount = v end })
+    ASet:CreateToggle({ Text = "Use Ping Prediction", Default = false, Index = "Aim_PingPrediction",
+        Callback = function(v) Settings.Aimbot.UsePingPrediction = v end })
     ASet:CreateToggle({ Text = "Anti-360", Default = false, Index = "Aim_Anti360",
         Callback = function(v) Settings.Aimbot.Anti360.Enabled = v end })
     ASet:CreateToggle({ Text = "Sticky Target Lock", Default = false, Index = "Aim_StickyLock",
         Callback = function(v) Settings.Aimbot.StickyLock = v end })
     ASet:CreateSlider({ Text = "Sticky Timeout (s)", Min = 0.5, Max = 10, Default = 2, Index = "Aim_StickyTimeout",
         Callback = function(v) Settings.Aimbot.StickyTimeout = v end })
-    ASet:CreateDropdown({ Text = "Aim Part Lock", Options = Vars.BODY_PARTS_ALL, Default = "Auto (Nearest to Crosshair)", Index = "Aim_AimPartMode",
+
+    -- ============================================================
+    -- Sub-sección: AIM PART MODE (con FOV Selectivo)
+    -- ============================================================
+    local APMSet = AimbotTab:CreateSection("Aim Part Selection")
+    APMSet:CreateLabel("Selective FOV: apunta a la parte del cuerpo segun la posicion del mouse dentro del FOV")
+    APMSet:CreateLabel("Hybrid: base fija (Head) que baja lentamente a Torso/Legs")
+    APMSet:CreateDropdown({ Text = "Aim Part Mode", Options = Vars.BODY_PARTS_ALL, Default = "Selective FOV", Index = "Aim_AimPartMode",
         Callback = function(v)
             Settings.Aimbot.AimPartMode = v
             Vars.targetTransition.previousPlayer = nil
         end })
 
+    -- Sub-sección: Selective FOV zones
+    local SelSet = AimbotTab:CreateSection("Selective FOV Zones")
+    SelSet:CreateSlider({ Text = "Head Zone Bottom", Min = 0, Max = 1, Default = 0.35, Index = "Sel_HeadBottom",
+        Callback = function(v) Settings.Aimbot.Selective.HeadZoneBottom = v end })
+    SelSet:CreateSlider({ Text = "Torso Zone Bottom", Min = 0, Max = 1, Default = 0.70, Index = "Sel_TorsoBottom",
+        Callback = function(v) Settings.Aimbot.Selective.TorsoZoneBottom = v end })
+    SelSet:CreateSlider({ Text = "Left Arm Zone Right", Min = 0, Max = 1, Default = 0.35, Index = "Sel_LeftArmRight",
+        Callback = function(v) Settings.Aimbot.Selective.LeftArmZoneRight = v end })
+    SelSet:CreateSlider({ Text = "Right Arm Zone Left", Min = 0, Max = 1, Default = 0.65, Index = "Sel_RightArmLeft",
+        Callback = function(v) Settings.Aimbot.Selective.RightArmZoneLeft = v end })
+    SelSet:CreateSlider({ Text = "Transition Smoothing", Min = 0, Max = 1, Default = 0.85, Index = "Sel_TransitionSmooth",
+        Callback = function(v) Settings.Aimbot.Selective.TransitionSmoothing = v end })
+    SelSet:CreateSlider({ Text = "Deadzone Radius", Min = 0, Max = 0.5, Default = 0.05, Index = "Sel_Deadzone",
+        Callback = function(v) Settings.Aimbot.Selective.DeadzoneRadius = v end })
+
+    -- Sub-sección: Hybrid
+    local HybSet = AimbotTab:CreateSection("Hybrid Mode")
+    HybSet:CreateDropdown({ Text = "Hybrid Base Part", Options = {"Head", "UpperTorso", "Torso", "LowerTorso"}, Default = "Head", Index = "Hyb_BasePart",
+        Callback = function(v) Settings.Aimbot.Hybrid.BasePart = v end })
+    HybSet:CreateSlider({ Text = "Vertical Bias Threshold", Min = 0, Max = 1, Default = 0.15, Index = "Hyb_VertBias",
+        Callback = function(v) Settings.Aimbot.Hybrid.VerticalBiasThreshold = v end })
+    HybSet:CreateSlider({ Text = "Downward Smoothness", Min = 0, Max = 1, Default = 0.7, Index = "Hyb_DownSmooth",
+        Callback = function(v) Settings.Aimbot.Hybrid.DownwardSmoothness = v end })
+    HybSet:CreateToggle({ Text = "Allow Return (up)", Default = true, Index = "Hyb_AllowReturn",
+        Callback = function(v) Settings.Aimbot.Hybrid.AllowReturn = v end })
+
+    -- Whitelist
     local WLSet = AimbotTab:CreateSection("Whitelist")
     WLSet:CreateButton("Toggle Whitelist (current target)", function()
         local t = Vars.TargetManager:GetCurrentTarget()
@@ -3086,6 +3704,9 @@ do
         end
     end)
 
+    -- ============================================================
+    -- TAB: Aim Assist
+    -- ============================================================
     local AimAssistTab = Window:CreateTab("Aim Assist")
     local AASet = AimAssistTab:CreateSection("Aim Assist")
     AASet:CreateToggle({ Text = "Aim Assist Master", Default = false, Index = "AA_Enabled",
@@ -3107,6 +3728,8 @@ do
         Callback = function(v) Settings.AimAssist.Smoothness = v / 100 end })
     AASet:CreateDropdown({ Text = "Aim Part", Options = Vars.BODY_PARTS_ALL, Default = "Head", Index = "AA_AimPart",
         Callback = function(v) Settings.AimAssist.AimPart = v end })
+    AASet:CreateToggle({ Text = "Use Selective FOV", Default = false, Index = "AA_Selective",
+        Callback = function(v) Settings.AimAssist.Selective = v end })
     AASet:CreateDropdown({ Text = "Priority", Options = {"Distance", "FOV"}, Default = "Distance", Index = "AA_Priority",
         Callback = function(v) Settings.AimAssist.Priority = v end })
     AASet:CreateDropdown({ Text = "Method", Options = {"Camera", "Mouse"}, Default = "Camera", Index = "AA_Method",
@@ -3123,7 +3746,12 @@ do
         Callback = function(v) Settings.AimAssist.UsePrediction = v end })
     AASet:CreateSlider({ Text = "Prediction Amount", Min = 0.01, Max = 0.3, Default = 0.13, Index = "AA_PredAmount",
         Callback = function(v) Settings.AimAssist.PredictionAmount = v end })
+    AASet:CreateToggle({ Text = "Use Ping Prediction", Default = false, Index = "AA_PingPrediction",
+        Callback = function(v) Settings.AimAssist.UsePingPrediction = v end })
 
+    -- ============================================================
+    -- TAB: Weapon Mods
+    -- ============================================================
     local WeaponTab = Window:CreateTab("Weapon Mods")
     local WS = WeaponTab:CreateSection("Weapon")
     WS:CreateToggle({ Text = "No Recoil", Default = false, Index = "W_NoRecoil",
@@ -3132,6 +3760,9 @@ do
             if v then Vars.StartNoRecoil() else Vars.StopNoRecoil() end
         end })
 
+    -- ============================================================
+    -- TAB: Visuals
+    -- ============================================================
     local VisualsTab = Window:CreateTab("Visuals")
     local VLight = VisualsTab:CreateSection("Lighting")
     VLight:CreateToggle({ Text = "Full Bright", Default = false, Index = "Vis_FullBright",
@@ -3194,6 +3825,22 @@ do
     VCross:CreateSlider({ Text = "Gap", Min = 0, Max = 20, Default = 4, Index = "Vis_CrosshairGap",
         Callback = function(v) Settings.Visuals.CrosshairGap = v end })
 
+    -- ============================================================
+    -- TAB: Backtrack
+    -- ============================================================
+    local BacktrackTab = Window:CreateTab("Backtrack")
+    local BTSet = BacktrackTab:CreateSection("Backtrack (Rivals-style)")
+    BTSet:CreateLabel("Guarda historial de posiciones y apunta a posiciones pasadas")
+    BTSet:CreateToggle({ Text = "Enable Backtrack", Default = false, Index = "BT_Enabled",
+        Callback = function(v) Settings.Backtrack.Enabled = v end })
+    BTSet:CreateSlider({ Text = "Delay (s)", Min = 0.02, Max = 0.3, Default = 0.1, Index = "BT_Delay",
+        Callback = function(v) Settings.Backtrack.Delay = v end })
+    BTSet:CreateToggle({ Text = "Show Indicator", Default = false, Index = "BT_ShowIndicator",
+        Callback = function(v) Settings.Backtrack.ShowIndicator = v end })
+
+    -- ============================================================
+    -- TAB: Anti-Fall
+    -- ============================================================
     local AntiFallTab = Window:CreateTab("Anti-Fall")
     local AFSection = AntiFallTab:CreateSection("Anti-Fall Damage")
     AFSection:CreateToggle({ Text = "Disable Fall Damage", Default = false, Index = "AF_Enabled",
@@ -3202,6 +3849,9 @@ do
             if v then Vars.StartAntiFall() else Vars.StopAntiFall() end
         end })
 
+    -- ============================================================
+    -- TAB: Movement
+    -- ============================================================
     local MovementTab = Window:CreateTab("Movement")
     local MSet = MovementTab:CreateSection("Strafe HvH")
     MSet:CreateToggle({ Text = "Strafe HvH (Window Peek)", Default = false, Index = "Mov_Strafe",
@@ -3218,6 +3868,9 @@ do
     MSet:CreateDropdown({ Text = "Strafe Key Right", Options = {"D", "E", "C", "V"}, Default = "D", Index = "Mov_KeyRight",
         Callback = function(v) if Enum.KeyCode[v] then Settings.Movement.StrafeKeyRight = Enum.KeyCode[v] end end })
 
+    -- ============================================================
+    -- TAB: Exploit
+    -- ============================================================
     local ExploitTab = Window:CreateTab("Exploit")
     local ExpSet = ExploitTab:CreateSection("Movement")
     ExpSet:CreateToggle({ Text = "Spinbot (360 continuo)", Default = false, Index = "Exp_Spinbot",
@@ -3262,6 +3915,22 @@ do
         end })
     ExpSet:CreateLabel("Click izquierdo para teletransportarte")
 
+    -- ============================================================
+    -- TAB: Hotkeys
+    -- ============================================================
+    local HotkeyTab = Window:CreateTab("Hotkeys")
+    local HKSet = HotkeyTab:CreateSection("Configurable Hotkeys")
+    HKSet:CreateLabel("Cambiar las teclas de acceso rapido")
+    HKSet:CreateDropdown({ Text = "Toggle Menu", Options = {"RightShift","LeftShift","Insert","Home","F1","F2"}, Default = "RightShift", Index = "HK_ToggleMenu",
+        Callback = function(v) if Enum.KeyCode[v] then Settings.Hotkeys.ToggleMenu = Enum.KeyCode[v] end end })
+    HKSet:CreateDropdown({ Text = "Helper Toggle", Options = {"Y","U","I","O","P","H","J","K","L"}, Default = "Y", Index = "HK_Helper",
+        Callback = function(v) if Enum.KeyCode[v] then Settings.Hotkeys.Helper = Enum.KeyCode[v] end end })
+    HKSet:CreateDropdown({ Text = "Panic", Options = {"End","Delete","Backspace","F12"}, Default = "End", Index = "HK_Panic",
+        Callback = function(v) if Enum.KeyCode[v] then Settings.Hotkeys.Panic = Enum.KeyCode[v] end end })
+
+    -- ============================================================
+    -- TAB: Utility
+    -- ============================================================
     local UtilityTab = Window:CreateTab("Utility")
     local USync = UtilityTab:CreateSection("Sync Booster + FPS Helper")
     USync:CreateToggle({ Text = "Sync Booster (Sync + FPS)", Default = false, Index = "Sync_Enabled",
@@ -3315,9 +3984,12 @@ do
         if Window.Destroy then Window:Destroy() end
     end)
 
+    -- ============================================================
+    -- PANIC (End)
+    -- ============================================================
     Vars.panicConn = UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
-        if input.KeyCode == Enum.KeyCode.End then
+        if input.KeyCode == Settings.Hotkeys.Panic then
             Settings.ESP.Enabled = false
             Settings.Skeleton.Enabled = false
             Settings.Aimbot.Enabled = false
@@ -3343,6 +4015,7 @@ do
             Settings.Exploit.Fly = false
             Settings.Exploit.TeleportToCursor = false
             Settings.Aimbot.StickyLock = false
+            Settings.Backtrack.Enabled = false
             Vars.ClearAllESP()
             Vars.ClearAllSkeletons()
             Vars.ClearItemESP()
@@ -3368,6 +4041,7 @@ do
             Vars.setCustomFOV(false)
             Vars.StopXRay()
             if Vars.HudLabel then Vars.HudLabel.Visible = false end
+            if Vars.AimModeLabel then Vars.AimModeLabel.Visible = false end
             if _env.TownUI_Window then
                 pcall(function()
                     _env.TownUI_Window:Notify("Panic", "Todo desactivado (End)", 3, "Warning")
@@ -3404,6 +4078,7 @@ do
         pcall(function() Vars.itemRemovingConn:Disconnect() end)
         pcall(function() Vars.exploitFlyKeyConn:Disconnect() end)
         pcall(function() Vars.exploitFlyKeyEndConn:Disconnect() end)
+        pcall(function() Vars.posHistoryConn:Disconnect() end)
 
         Vars.StopNoRecoil()
         Vars.StopSyncBooster()
@@ -3444,9 +4119,11 @@ do
             pcall(function() Vars.aimAssistFOVCircle:Remove() end)
         end
         if Vars.HudLabel then pcall(function() Vars.HudLabel:Remove() end) end
+        if Vars.AimModeLabel then pcall(function() Vars.AimModeLabel:Remove() end) end
 
         Vars.stickyTarget = nil
         Vars.stickyLastSeen = 0
+        Vars.positionHistory = {}
 
         for _, c in ipairs(Vars.tracerConnections) do
             pcall(function() c:Disconnect() end)
@@ -3483,7 +4160,11 @@ do
     task.delay(1.0, function()
         if _env.TownUI_Window then
             pcall(function()
-                _env.TownUI_Window:Notify("Town Complete v9.6.3", "RightShift = Menu | Y = Helper | End = Panic", 6, "Success")
+                _env.TownUI_Window:Notify(
+                    "Town Complete v9.7.0",
+                    "RightShift = Menu | Y = Helper | End = Panic",
+                    6, "Success"
+                )
             end)
         end
     end)
