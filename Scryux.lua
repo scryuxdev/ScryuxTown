@@ -1,8 +1,8 @@
 --!strict
 -- ============================================================
--- Town Complete v9.9.6 (Scryux UI) - Parte 1/3
--- FPS Booster + Smart Nearest + Fling + Follow/Emote
--- Todos los toggles ON → OFF por default
+-- Town Complete v9.9.7 (Scryux UI) - Parte 1/3
+-- FPS Booster + Smart Nearest (bbox-based) + Aimbot flexible
+-- Sin Fling, sin Follow, sin JerkOff
 -- ============================================================
 
 local _env = getgenv and getgenv() or _G
@@ -56,7 +56,7 @@ do
         "https://github.com/scryuxdev/Scryux-Library/raw/main/Scryux-Library.lua?t=" .. tostring(os.time()),
     }
     local CACHE_FILE = "scryux_ui_cache.lua"
-    local CACHE_VERSION = "v9.9.6"
+    local CACHE_VERSION = "v9.9.7"
 
     local function SafeRequest(url)
         if Has("request") then
@@ -266,10 +266,10 @@ do
         startCFrame = nil,
         targetCFrame = nil,
         progress = 0,
-        duration = 0.25,
+        duration = 0.15,
         previousPlayer = nil,
     }
-    Vars.TARGET_TRANSITION_DURATION = 0.25
+    Vars.TARGET_TRANSITION_DURATION = 0.15
 
     Vars.deadBlacklist = {}
     Vars.DEAD_BLACKLIST_DURATION = 3
@@ -288,19 +288,8 @@ do
     Vars.exploitFlyKeyConn = nil
     Vars.exploitFlyKeyEndConn = nil
     Vars.exploitTeleportConn = nil
-
-    -- ✅ Fling vars
-    Vars.flingConn = nil
-    Vars.flingLastTime = 0
-    Vars.flingActive = false
-    Vars.flingTarget = nil
-
-    -- ✅ Follow vars
-    Vars.followConn = nil
-    Vars.followActive = false
-    Vars.followT = 0
-    Vars.jerkOffLoaded = false
-    Vars.jerkOffRunning = false
+    Vars.exploitWalkspeedCharConn = nil
+    Vars.exploitJumpCharConn = nil
 
     Vars.positionHistory = {}
     Vars.POS_HISTORY_MAX = 20
@@ -376,7 +365,7 @@ do
     Vars.autorespawnDeathPos = nil
 
     -- ============================================
-    -- CONFIGURACIÓN (✅ TODO OFF por default)
+    -- CONFIGURACIÓN (todo off)
     -- ============================================
     Settings = {
         ESP = {
@@ -440,11 +429,16 @@ do
                 DeadzoneRadius = 0.05,
             },
             SmartNearest = {
-                HeadBonus = 8,
-                TorsoBonus = 5,
-                LimbBonus = 0,
+                -- Nuevo: zonas basadas en bounding box del personaje
+                HeadZone = 0.22,          -- top 22% = cabeza
+                TorsoZone = 0.55,         -- 22-55% = torso
+                LeftArmZoneX = 0.35,      -- izquierda <35%
+                RightArmZoneX = 0.65,     -- derecha >65%
                 RequireVisible = false,
                 MaxScreenDist = 250,
+                -- Bonus opcional (0 = puramente zona)
+                HeadBonus = 0,
+                TorsoBonus = 0,
             },
             Hybrid = {
                 Enabled = false, BasePart = "Head",
@@ -454,7 +448,7 @@ do
             HelperSmoothness = 0.15, BaseSmoothness = 0.15,
             UsePrediction = false, PredictionAmount = 0.13,
             UsePingPrediction = false,
-            Priority = "Distance",
+            Priority = "FOV",
             StickyLock = false, StickyTimeout = 2,
             RequireGun = false,
             BonePriority = {
@@ -482,9 +476,10 @@ do
             UsePrediction = false, PredictionAmount = 0.13,
             UsePingPrediction = false, Selective = false,
             SmartNearest = {
-                HeadBonus = 8,
-                TorsoBonus = 5,
-                LimbBonus = 0,
+                HeadZone = 0.22,
+                TorsoZone = 0.55,
+                LeftArmZoneX = 0.35,
+                RightArmZoneX = 0.65,
                 RequireVisible = false,
                 MaxScreenDist = 250,
             },
@@ -519,21 +514,6 @@ do
             JumpPower = false, JumpPowerValue = 50,
             Noclip = false, Fly = false, FlySpeed = 50,
             TeleportToCursor = false,
-            -- Fling
-            FlingEnabled = false,
-            FlingOnlyNearest = false,
-            FlingVelocity = 1e24,
-            FlingCooldown = 0.15,
-            FlingLoop = false,
-            FlingTransparency = false,
-            -- Follow / Emote
-            FollowEnabled = false,
-            FollowTargetName = nil,
-            FollowMode = "Follow",        -- "Follow" | "TPose" | "JerkOff"
-            FollowOffsetX = 3,
-            FollowOffsetY = 0,
-            FollowOffsetZ = 0,
-            FollowLockRotation = false,
         },
         Hotkeys = {
             ToggleMenu = Enum.KeyCode.RightShift,
@@ -919,48 +899,113 @@ do
         return false
     end
 
+    -- ============================================================
+    -- ✅ NUEVO SMART NEAREST (v9.9.7)
+    -- Basado en bounding-box del personaje en pantalla + zonas.
+    -- Mucho más smooth: el mouse manda la selección de parte.
+    -- ============================================================
     local function GetSmartNearestVisiblePart(player, cam, screenPos, fovRadius, requireVisible, headBonus, torsoBonus)
         if not player or not player.Character then return nil end
         local char = player.Character
         local rigType = GetRigType(char)
         if not rigType then return nil end
 
-        local parts = rigType == "R15" and SMART_PARTS_R15 or SMART_PARTS_R6
-        local myHead = LP.Character and LP.Character:FindFirstChild("Head")
-        local origin = myHead and myHead.Position or cam.CFrame.Position
-
-        headBonus = headBonus or 0
-        torsoBonus = torsoBonus or 0
-
-        local best, bestScore = nil, math.huge
-        local maxDist = (Settings.Aimbot.SmartNearest and Settings.Aimbot.SmartNearest.MaxScreenDist) or 250
-
-        for _, partName in ipairs(parts) do
-            local part = char:FindFirstChild(partName)
-            if not part or not part:IsA("BasePart") then continue end
-
-            local sp, onScreen = cam:WorldToViewportPoint(part.Position)
-            if not onScreen then continue end
-            local screenDist = (V2(sp.X, sp.Y) - screenPos).Magnitude
-            if screenDist > maxDist then continue end
-
-            if requireVisible then
-                local visible = IsPartVisibleFrom(part, origin, char, cam)
-                if not visible then continue end
+        -- 1. Bounding box del target en pantalla
+        local boxPos, boxSize, ok = GetBoundingVectors(char)
+        if not ok or not boxPos or not boxSize then
+            -- fallback: usar lógica antigua basada en distancia
+            local parts = rigType == "R15" and SMART_PARTS_R15 or SMART_PARTS_R6
+            local best, bestScore = nil, math.huge
+            local maxDist = 250
+            for _, partName in ipairs(parts) do
+                local part = char:FindFirstChild(partName)
+                if part and part:IsA("BasePart") then
+                    local sp, onScreen = cam:WorldToViewportPoint(part.Position)
+                    if onScreen then
+                        local d = (V2(sp.X, sp.Y) - screenPos).Magnitude
+                        if d < maxDist and d < bestScore then
+                            bestScore = d; best = part
+                        end
+                    end
+                end
             end
+            return best
+        end
 
-            local bonus = 0
-            if partName == "Head" then bonus = headBonus
-            elseif partName == "UpperTorso" or partName == "Torso" then bonus = torsoBonus
+        -- 2. Normalizar la posición del mouse dentro del bounding box
+        local relX = (screenPos.X - boxPos.X) / math.max(boxSize.X, 1)
+        local relY = (screenPos.Y - boxPos.Y) / math.max(boxSize.Y, 1)
+
+        -- clamp por si el mouse está fuera del bbox
+        if relX < -0.3 or relX > 1.3 or relY < -0.3 or relY > 1.3 then
+            return nil
+        end
+
+        local cfg = Settings.Aimbot.SmartNearest or {}
+        local headZone = cfg.HeadZone or 0.22
+        local torsoZone = cfg.TorsoZone or 0.55
+        local leftArmX = cfg.LeftArmZoneX or 0.35
+        local rightArmX = cfg.RightArmZoneX or 0.65
+
+        -- 3. Selección por zona (smooth: sigue al mouse)
+        local partName
+        if rigType == "R15" then
+            if relY < headZone then
+                partName = "Head"
+            elseif relY < torsoZone then
+                if relX < leftArmX then partName = "LeftUpperArm"
+                elseif relX > rightArmX then partName = "RightUpperArm"
+                else partName = "UpperTorso" end
+            else
+                if relX < 0.4 then partName = "LeftUpperLeg"
+                elseif relX > 0.6 then partName = "RightUpperLeg"
+                else partName = "LowerTorso" end
             end
-
-            local score = screenDist - bonus
-            if score < bestScore then
-                bestScore = score
-                best = part
+        else
+            -- R6
+            if relY < headZone then
+                partName = "Head"
+            elseif relY < torsoZone then
+                if relX < leftArmX then partName = "Left Arm"
+                elseif relX > rightArmX then partName = "Right Arm"
+                else partName = "Torso" end
+            else
+                if relX < 0.4 then partName = "Left Leg"
+                elseif relX > 0.6 then partName = "Right Leg"
+                else partName = "Torso" end
             end
         end
-        return best
+
+        local part = char:FindFirstChild(partName)
+        if not part or not part:IsA("BasePart") then
+            part = char:FindFirstChild("Head") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+        end
+
+        -- 4. Verificación de visibilidad (opcional)
+        if requireVisible and part then
+            local myHead = LP.Character and LP.Character:FindFirstChild("Head")
+            local origin = myHead and myHead.Position or cam.CFrame.Position
+            if not IsPartVisibleFrom(part, origin, char, cam) then
+                -- Probar la parte visible más cercana al mouse
+                local parts = rigType == "R15" and SMART_PARTS_R15 or SMART_PARTS_R6
+                local best, bestScore = nil, math.huge
+                for _, pn in ipairs(parts) do
+                    local p = char:FindFirstChild(pn)
+                    if p and p:IsA("BasePart") then
+                        local sp, onScreen = cam:WorldToViewportPoint(p.Position)
+                        if onScreen then
+                            local d = (V2(sp.X, sp.Y) - screenPos).Magnitude
+                            if d < bestScore and IsPartVisibleFrom(p, origin, char, cam) then
+                                bestScore = d; best = p
+                            end
+                        end
+                    end
+                end
+                part = best or part
+            end
+        end
+
+        return part
     end
     Vars.GetSmartNearestVisiblePart = GetSmartNearestVisiblePart
     Vars.IsPartVisibleFrom = IsPartVisibleFrom
@@ -1796,8 +1841,6 @@ do
         if Settings.Advanced.Desync_Enabled then table_insert(leftParts, "DESYNC") end
         if Settings.Advanced.FPSBooster_Enabled then table_insert(leftParts, "FPSBOOST") end
         if Settings.Advanced.AntiKick then table_insert(leftParts, "ANTIKICK") end
-        if Settings.Exploit.FlingEnabled then table_insert(leftParts, "FLING") end
-        if Settings.Exploit.FollowEnabled then table_insert(leftParts, "FOLLOW") end
 
         local leftText = table_concat(leftParts, "  |  ")
 
@@ -2590,8 +2633,8 @@ do
             local part = GetSmartNearestVisiblePart(
                 player, cam, fovCenter, fovRadius,
                 cfg.RequireVisible,
-                cfg.HeadBonus or 8,
-                cfg.TorsoBonus or 5
+                cfg.HeadBonus or 0,
+                cfg.TorsoBonus or 0
             )
             Vars.currentSmartPartName = part and part.Name or nil
             return part
@@ -2608,7 +2651,8 @@ do
             Vars.currentHybridPartName = part and part.Name or nil
             return part
         elseif mode == "Head" then
-            return char:FindFirstChild("Head") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
+            -- ✅ FIX: re-evaluar siempre la parte según el estado actual
+            return char:FindFirstChild("Head")
         elseif mode == "Torso" then
             return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("Head")
         else
@@ -2724,7 +2768,7 @@ do
             Vars.targetTransition.previousPlayer = nil
             return nil
         end
-        local pr = Settings.Aimbot.Priority or "Distance"
+        local pr = Settings.Aimbot.Priority or "FOV"
         local best, bs = nil, math.huge
         for _, x in ipairs(c) do
             local s
@@ -2736,7 +2780,7 @@ do
                 local prio = Settings.Aimbot.BonePriority[x.aimPartName] or 0.5
                 s = x.screenDist / math.max(prio, 0.01)
             else
-                s = x.distance
+                s = x.screenDist
             end
             if s < bs then bs = s; best = x end
         end
@@ -2888,6 +2932,12 @@ do
             return
         end
 
+        -- ✅ FIX: el aim part se reevalúa cada frame para que siga al mouse
+        -- (importante en modo "Head"/"Torso"/Smart Nearest cuando mueves el mouse)
+        if TargetManager:GetCurrentTarget() then
+            TargetManager:UpdateTarget()
+        end
+
         if Settings.Aimbot.StickyLock and TargetManager:GetCurrentTarget() then
             local ct = TargetManager:GetCurrentTarget()
             local stillValid = TargetManager:ValidateTarget(ct.player)
@@ -2902,41 +2952,6 @@ do
             end
         elseif not Settings.Aimbot.StickyLock then
             Vars.stickyTarget = nil
-        end
-
-        TargetManager:UpdateTarget()
-
-        if Settings.Aimbot.StickyLock and Vars.stickyTarget and Vars.stickyTarget.Character then
-            local stHum = Vars.stickyTarget.Character:FindFirstChildOfClass("Humanoid")
-            if stHum and stHum.Health > 0 then
-                local cam = GetCamera()
-                local fovCenter = Vars.helperMousePosition
-                local fovRadius = ComputeFOVRadius(cam, Settings.Aimbot.FOV)
-                local stPart = ResolveAimPart(Vars.stickyTarget, cam, fovCenter, fovRadius)
-                if stPart then
-                    TargetManager:LockTarget({
-                        player = Vars.stickyTarget, part = stPart, targetPos = stPart.Position,
-                        distance = 0, screenDist = 0, screenPos = V2(0, 0),
-                        aimPartName = stPart.Name,
-                    })
-                end
-            end
-        end
-
-        local ct = TargetManager:GetCurrentTarget()
-        if ct and ct.player ~= Vars.targetTransition.previousPlayer then
-            local aimPos = ct.part and ct.part.Position or nil
-            if aimPos then
-                local cam = GetCamera()
-                Vars.targetTransition.active = true
-                Vars.targetTransition.startCFrame = cam.CFrame
-                Vars.targetTransition.targetCFrame = CFrame_new(cam.CFrame.Position, aimPos)
-                Vars.targetTransition.progress = 0
-                Vars.targetTransition.duration = Vars.TARGET_TRANSITION_DURATION
-                Vars.targetTransition.previousPlayer = ct.player
-            end
-        elseif not ct then
-            Vars.targetTransition.previousPlayer = nil
         end
 
         if not TargetManager:GetCurrentTarget() then
@@ -3136,8 +3151,8 @@ do
             local part = GetSmartNearestVisiblePart(
                 player, cam, center, radius,
                 cfg.RequireVisible ~= false,
-                cfg.HeadBonus or 8,
-                cfg.TorsoBonus or 5
+                cfg.HeadBonus or 0,
+                cfg.TorsoBonus or 0
             )
             if not part then continue end
 
@@ -3290,7 +3305,8 @@ do
 end
 
 -- ============================================================
--- BLOQUE 8: Sync + Desync + Anti-Fall + Strafe + Exploits + FLING + FOLLOW
+-- BLOQUE 8: Sync + Desync + Anti-Fall + Strafe + Exploits
+-- (SIN Fling, SIN Follow, SIN JerkOff)
 -- ============================================================
 do
     local Players = Vars.Players
@@ -3300,7 +3316,6 @@ do
     local Settings = Vars.Settings
     local V3 = Vars.Vector3_new
     local CFrame_new = Vars.CFrame_new
-    local CFrame_Angles = Vars.CFrame_Angles
     local math_rad = Vars.math_rad
     local table_insert = Vars.table_insert
     local os_clock = Vars.os_clock
@@ -3433,7 +3448,6 @@ do
         end
     end)
 
-    -- DESYNC
     local function StartDesync()
         if Vars.desyncActive then return end
         if not LP.Character then return end
@@ -3545,7 +3559,6 @@ do
     Vars.StartDesync = StartDesync
     Vars.StopDesync = StopDesync
 
-    -- Anti-Fall
     local function StartAntiFall()
         if Vars.antiFallRunning then return end
         Vars.antiFallRunning = true
@@ -3603,7 +3616,6 @@ do
     end
     Vars.StopAntiFall = StopAntiFall
 
-    -- Strafe
     local strafeLeftConn = nil
     local strafeLeftEndConn = nil
     local lastPeek = 0
@@ -3655,7 +3667,7 @@ do
         if strafeLeftEndConn then pcall(function() strafeLeftEndConn:Disconnect() end); strafeLeftEndConn = nil end
     end
 
-    -- Spinbot (default 1000)
+    -- Spinbot (max 5000)
     local lastSpin = 0
     local spinAngle = 0
     Vars.StartExploitSpinbot = function()
@@ -3697,16 +3709,43 @@ do
         end
     end
 
+    -- ============================================================
+    -- ✅ WALKSPEED arreglado (v9.9.7)
+    -- Reconecta en CharacterAdded para no dejar de aplicar tras respawn.
+    -- Usa Stepped para evitar conflictos con el motor.
+    -- ============================================================
+    local function ApplyWalkspeedTick()
+        if Vars.isScriptUnloaded then return end
+        if not Settings.Exploit.Walkspeed then return end
+        local char = LP.Character
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+        local target = Settings.Exploit.WalkspeedValue or 16
+        if target > 5000 then target = 5000 end
+        if target < 0 then target = 0 end
+        if hum.WalkSpeed ~= target then
+            hum.WalkSpeed = target
+        end
+    end
+
     Vars.StartExploitWalkspeed = function()
         if Vars.exploitWalkspeedConn then return end
-        Vars.exploitWalkspeedConn = RunService.Heartbeat:Connect(function()
-            if not Settings.Exploit.Walkspeed then return end
-            local char = LP.Character
-            if not char then return end
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if not hum then return end
-            if hum.WalkSpeed ~= Settings.Exploit.WalkspeedValue then
-                hum.WalkSpeed = Settings.Exploit.WalkspeedValue
+        Vars.exploitWalkspeedConn = RunService.Stepped:Connect(ApplyWalkspeedTick)
+        -- ✅ Reconectar en respawn
+        if Vars.exploitWalkspeedCharConn then
+            pcall(function() Vars.exploitWalkspeedCharConn:Disconnect() end)
+        end
+        Vars.exploitWalkspeedCharConn = LP.CharacterAdded:Connect(function(char)
+            task.wait(0.3)
+            -- Re-aplicar tras respawn si sigue activo
+            if Settings.Exploit.Walkspeed then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    local target = Settings.Exploit.WalkspeedValue or 16
+                    if target > 5000 then target = 5000 end
+                    hum.WalkSpeed = target
+                end
             end
         end)
     end
@@ -3715,18 +3754,38 @@ do
             pcall(function() Vars.exploitWalkspeedConn:Disconnect() end)
             Vars.exploitWalkspeedConn = nil
         end
+        if Vars.exploitWalkspeedCharConn then
+            pcall(function() Vars.exploitWalkspeedCharConn:Disconnect() end)
+            Vars.exploitWalkspeedCharConn = nil
+        end
+    end
+
+    local function ApplyJumpTick()
+        if Vars.isScriptUnloaded then return end
+        if not Settings.Exploit.JumpPower then return end
+        local char = LP.Character
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum then return end
+        local target = Settings.Exploit.JumpPowerValue or 50
+        if hum.JumpPower ~= target then
+            hum.JumpPower = target
+        end
     end
 
     Vars.StartExploitJumpPower = function()
         if Vars.exploitJumpConn then return end
-        Vars.exploitJumpConn = RunService.Heartbeat:Connect(function()
-            if not Settings.Exploit.JumpPower then return end
-            local char = LP.Character
-            if not char then return end
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if not hum then return end
-            if hum.JumpPower ~= Settings.Exploit.JumpPowerValue then
-                hum.JumpPower = Settings.Exploit.JumpPowerValue
+        Vars.exploitJumpConn = RunService.Stepped:Connect(ApplyJumpTick)
+        if Vars.exploitJumpCharConn then
+            pcall(function() Vars.exploitJumpCharConn:Disconnect() end)
+        end
+        Vars.exploitJumpCharConn = LP.CharacterAdded:Connect(function(char)
+            task.wait(0.3)
+            if Settings.Exploit.JumpPower then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    hum.JumpPower = Settings.Exploit.JumpPowerValue or 50
+                end
             end
         end)
     end
@@ -3734,6 +3793,10 @@ do
         if Vars.exploitJumpConn then
             pcall(function() Vars.exploitJumpConn:Disconnect() end)
             Vars.exploitJumpConn = nil
+        end
+        if Vars.exploitJumpCharConn then
+            pcall(function() Vars.exploitJumpCharConn:Disconnect() end)
+            Vars.exploitJumpCharConn = nil
         end
     end
 
@@ -3847,404 +3910,6 @@ do
             pcall(function() Vars.exploitTeleportConn:Disconnect() end)
             Vars.exploitTeleportConn = nil
         end
-    end
-
-    -- ============================================================
-    -- FLING (v9.9.6) - techo 1e24 - NUNCA al local player
-    -- ============================================================
-    local function FlingTarget(targetPlayer)
-        if not targetPlayer then return false end
-        if targetPlayer == LP then return false end
-        if not targetPlayer.Character then return false end
-
-        local char = targetPlayer.Character
-        local root = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not root or not hum then return false end
-
-        local raw = Settings.Exploit.FlingVelocity or 1e24
-        local mag = raw
-        if mag > 1e24 then mag = 1e24 end
-        if mag < 1e5 then mag = 1e5 end
-
-        local vel = V3(mag, mag, mag)
-
-        -- 1. Tomar network ownership
-        pcall(function()
-            if root.SetNetworkOwner then
-                root:SetNetworkOwner(LP)
-            end
-        end)
-        pcall(function()
-            if sethiddenproperty then
-                sethiddenproperty(root, "NetworkOwnershipRule", 0)
-            end
-        end)
-
-        -- 2. Desactivar Humanoid (evita que el server lo rescate)
-        pcall(function()
-            hum.PlatformStand = true
-            hum:ChangeState(Enum.HumanoidStateType.Physics)
-            hum:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
-        end)
-
-        -- 3. Quitar colisiones
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") then
-                pcall(function()
-                    part.CanCollide = false
-                    part.Massless = true
-                end)
-            end
-        end
-
-        -- 4. Apply a root + torso + head
-        local partsToKick = { root }
-        for _, n in ipairs({"UpperTorso","LowerTorso","Torso","Head"}) do
-            local p = char:FindFirstChild(n)
-            if p and p:IsA("BasePart") then table.insert(partsToKick, p) end
-        end
-
-        for _, p in ipairs(partsToKick) do
-            pcall(function()
-                p.AssemblyLinearVelocity = vel
-                p.AssemblyAngularVelocity = vel
-            end)
-            pcall(function()
-                p.Velocity = vel
-                p.RotVelocity = vel
-            end)
-        end
-
-        -- 5. Fallback BodyVelocity + BodyAngularVelocity
-        pcall(function()
-            local oldA = root:FindFirstChild("TC_FlingAngular")
-            if oldA then oldA:Destroy() end
-            local oldV = root:FindFirstChild("TC_FlingLinear")
-            if oldV then oldV:Destroy() end
-
-            local bav = Instance.new("BodyAngularVelocity")
-            bav.Name = "TC_FlingAngular"
-            bav.AngularVelocity = vel
-            bav.MaxTorque = V3(math.huge, math.huge, math.huge)
-            bav.P = math.huge
-            bav.Parent = root
-
-            local bv = Instance.new("BodyVelocity")
-            bv.Name = "TC_FlingLinear"
-            bv.Velocity = vel
-            bv.MaxForce = V3(math.huge, math.huge, math.huge)
-            bv.P = math.huge
-            bv.Parent = root
-
-            task.delay(0.35, function()
-                pcall(function() if bav.Parent then bav:Destroy() end end)
-                pcall(function() if bv.Parent then bv:Destroy() end end)
-            end)
-        end)
-
-        if Settings.Exploit.FlingTransparency then
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    pcall(function() part.Transparency = 1 end)
-                end
-            end
-        end
-
-        return true
-    end
-
-    local function FlingAll()
-        for _, p in ipairs(Vars.activePlayers) do
-            if p ~= LP and p.Character then
-                pcall(FlingTarget, p)
-            end
-        end
-    end
-
-    local function FlingLoopTick()
-        if Vars.isScriptUnloaded or not Settings.Exploit.FlingEnabled then return end
-
-        local now = os_clock()
-        if (now - Vars.flingLastTime) < Settings.Exploit.FlingCooldown then return end
-        Vars.flingLastTime = now
-
-        if Settings.Exploit.FlingOnlyNearest then
-            local t = Vars.TargetManager and Vars.TargetManager:GetCurrentTarget()
-            if t and t.player and t.player ~= LP and t.player.Character then
-                pcall(FlingTarget, t.player)
-            end
-        else
-            pcall(FlingAll)
-        end
-    end
-
-    Vars.StartFling = function()
-        if Vars.flingActive then return end
-        Vars.flingActive = true
-        Settings.Exploit.FlingEnabled = true
-        Vars.flingLastTime = 0
-
-        Vars.flingConn = RunService.Heartbeat:Connect(function()
-            if Vars.isScriptUnloaded or not Vars.flingActive then return end
-            if not Settings.Exploit.FlingLoop then return end
-            pcall(FlingLoopTick)
-        end)
-
-        Logger.Info("Fling ACTIVADO (techo 1e24, solo a otros)")
-    end
-
-    Vars.StopFling = function()
-        if not Vars.flingActive then
-            Settings.Exploit.FlingEnabled = false
-            return
-        end
-        Vars.flingActive = false
-        Settings.Exploit.FlingEnabled = false
-        if Vars.flingConn then
-            pcall(function() Vars.flingConn:Disconnect() end)
-            Vars.flingConn = nil
-        end
-        Logger.Info("Fling DESACTIVADO")
-    end
-
-    Vars.FlingOnce = function()
-        if Settings.Exploit.FlingOnlyNearest then
-            local t = Vars.TargetManager and Vars.TargetManager:GetCurrentTarget()
-            if t and t.player and t.player ~= LP then
-                pcall(FlingTarget, t.player)
-            end
-        else
-            pcall(FlingAll)
-        end
-    end
-
-    -- ============================================================
-    -- FOLLOW / EMOTE (v9.9.6)
-    -- Tu personaje flota al lado del target y hace un emote.
-    -- Modos: Follow | TPose | JerkOff (carga script externo por URL)
-    -- ============================================================
-    local JERKOFF_URLS = {
-        "https://pastefy.app/wa3v2Vgm/raw",
-        "https://raw.githubusercontent.com/yoursvexyyy/TROLL-SCRIPTS/refs/heads/main/jerk%20off%2Bfly",
-    }
-
-    local function LoadJerkOffScript()
-        if Vars.jerkOffLoaded then return true end
-        if type(loadstring) ~= "function" then return false end
-
-        for _, url in ipairs(JERKOFF_URLS) do
-            local ok, code = pcall(function() return game:HttpGet(url) end)
-            if ok and code and #code > 100 then
-                local fn, err = loadstring(code)
-                if fn then
-                    _env.JerkOffFly_Loaded = true
-                    local ok2, result = pcall(fn)
-                    if ok2 then
-                        Vars.jerkOffLoaded = true
-                        Logger.Info("JerkOff+Fly cargado desde: " .. url)
-                        return true
-                    else
-                        Logger.Warn("JerkOff ejecución falló: " .. tostring(result))
-                    end
-                else
-                    Logger.Warn("JerkOff loadstring falló: " .. tostring(err))
-                end
-            end
-        end
-        Logger.Warn("No se pudo cargar JerkOff desde ninguna URL")
-        return false
-    end
-    Vars.LoadJerkOffScript = LoadJerkOffScript
-
-    -- Aplica TPose manualmente (sin script externo)
-    local function ApplyTPose(char, myRoot)
-        local lArm, rArm
-        -- R15
-        if char:FindFirstChild("RightUpperArm") then
-            lArm = char:FindFirstChild("LeftUpperArm")
-            rArm = char:FindFirstChild("RightUpperArm")
-        elseif char:FindFirstChild("Right Arm") then
-            -- R6
-            lArm = char:FindFirstChild("Left Arm")
-            rArm = char:FindFirstChild("Right Arm")
-        end
-        if lArm then
-            lArm.CFrame = myRoot.CFrame * CFrame_new(-1.0, 0.2, 0) * CFrame_Angles(0, 0, math_rad(90))
-            lArm.AssemblyLinearVelocity = V3(0,0,0)
-            lArm.AssemblyAngularVelocity = V3(0,0,0)
-        end
-        if rArm then
-            rArm.CFrame = myRoot.CFrame * CFrame_new(1.0, 0.2, 0) * CFrame_Angles(0, 0, math.rad(-90))
-            rArm.AssemblyLinearVelocity = V3(0,0,0)
-            rArm.AssemblyAngularVelocity = V3(0,0,0)
-        end
-    end
-
-    -- JerkOff manual (implementación interna compatible R6/R15)
-    -- Manipula el Motor6D del hombro derecho para animar movimiento rápido.
-    local function ApplyJerkOffManual(char, myRoot, t)
-        -- R15
-        local rShoulder = char:FindFirstChild("RightShoulder")
-        -- R6
-        local rShoulderR6 = char:FindFirstChild("Right Shoulder")
-
-        local motor = rShoulder or rShoulderR6
-        if not motor then return end
-
-        local speed = 25
-        local amount = 55
-        local angle = math.sin(t * speed) * amount
-        local baseAngle = math.rad(-90 + angle)
-
-        pcall(function()
-            if motor:IsA("Motor6D") then
-                if rShoulder then
-                    -- R15: RightShoulder Motor6D
-                    motor.C0 = CFrame_new(1, 0.5, 0) * CFrame_Angles(0, baseAngle, 0)
-                else
-                    -- R6: Right Shoulder Motor6D
-                    motor.C0 = CFrame_new(1, 0.5, 0) * CFrame_Angles(0, baseAngle, 0)
-                end
-            end
-        end)
-
-        -- Restaurar brazo izquierdo pegado al cuerpo
-        local lShoulder = char:FindFirstChild("LeftShoulder") or char:FindFirstChild("Left Shoulder")
-        if lShoulder then
-            pcall(function()
-                if lShoulder:IsA("Motor6D") then
-                    lShoulder.C0 = CFrame_new(-1, 0.5, 0) * CFrame_Angles(0, math.rad(-90), 0)
-                end
-            end)
-        end
-    end
-
-    local function RestoreMotors(char)
-        if not char then return end
-        local rShoulder = char:FindFirstChild("RightShoulder") or char:FindFirstChild("Right Shoulder")
-        local lShoulder = char:FindFirstChild("LeftShoulder") or char:FindFirstChild("Left Shoulder")
-        pcall(function()
-            if rShoulder and rShoulder:IsA("Motor6D") then
-                rShoulder.C0 = CFrame_new(1, 0.5, 0) * CFrame_Angles(0, math.rad(-90), 0)
-            end
-        end)
-        pcall(function()
-            if lShoulder and lShoulder:IsA("Motor6D") then
-                lShoulder.C0 = CFrame_new(-1, 0.5, 0) * CFrame_Angles(0, math.rad(90), 0)
-            end
-        end)
-    end
-    Vars.RestoreMotors = RestoreMotors
-
-    local function FollowTick()
-        if not Settings.Exploit.FollowEnabled then return end
-        if Vars.isScriptUnloaded or Vars.isLocalDead then return end
-
-        local targetName = Settings.Exploit.FollowTargetName
-        if not targetName or targetName == "" then return end
-
-        local target = Players:FindFirstChild(targetName)
-        if not target or target == LP then return end
-        if not target.Character then return end
-
-        local myChar = LP.Character
-        if not myChar then return end
-
-        local tRoot = target.Character:FindFirstChild("HumanoidRootPart")
-        if not tRoot then return end
-
-        local myRoot = myChar:FindFirstChild("HumanoidRootPart")
-        local myHum = myChar:FindFirstChildOfClass("Humanoid")
-        if not myRoot or not myHum then return end
-
-        pcall(function()
-            myHum.PlatformStand = true
-            myHum:ChangeState(Enum.HumanoidStateType.Physics)
-        end)
-
-        local offset = tRoot.CFrame:VectorToWorldSpace(
-            V3(Settings.Exploit.FollowOffsetX or 3,
-               Settings.Exploit.FollowOffsetY or 0,
-               Settings.Exploit.FollowOffsetZ or 0)
-        )
-        local desiredPos = tRoot.Position + offset
-
-        local lookAt = Settings.Exploit.FollowLockRotation and tRoot.Position or desiredPos + tRoot.CFrame.LookVector
-        pcall(function()
-            myRoot.CFrame = CFrame_new(desiredPos, lookAt)
-            myRoot.AssemblyLinearVelocity = V3(0,0,0)
-            myRoot.AssemblyAngularVelocity = V3(0,0,0)
-        end)
-
-        local mode = Settings.Exploit.FollowMode or "Follow"
-        if mode == "TPose" then
-            pcall(ApplyTPose, myChar, myRoot)
-        elseif mode == "JerkOff" then
-            Vars.followT = (Vars.followT or 0) + 1/60
-            pcall(ApplyJerkOffManual, myChar, myRoot, Vars.followT)
-        end
-    end
-
-    Vars.StartFollowPlayer = function(targetName)
-        if targetName == nil then
-            targetName = Settings.Exploit.FollowTargetName
-        end
-        if not targetName or targetName == "" then
-            Logger.Warn("Follow: no target seleccionado")
-            return
-        end
-        if targetName == LP.Name then
-            Logger.Warn("Follow: no puedes seguirte a ti mismo")
-            return
-        end
-
-        Settings.Exploit.FollowTargetName = targetName
-        Settings.Exploit.FollowEnabled = true
-
-        if Vars.followConn then
-            pcall(function() Vars.followConn:Disconnect() end)
-            Vars.followConn = nil
-        end
-
-        Vars.followActive = true
-        Vars.followT = 0
-        Vars.followConn = RunService.Heartbeat:Connect(function()
-            pcall(FollowTick)
-        end)
-
-        Logger.Info("Follow ACTIVADO → " .. targetName)
-    end
-
-    Vars.StopFollowPlayer = function()
-        Settings.Exploit.FollowEnabled = false
-        Vars.followActive = false
-        if Vars.followConn then
-            pcall(function() Vars.followConn:Disconnect() end)
-            Vars.followConn = nil
-        end
-        if LP.Character then
-            RestoreMotors(LP.Character)
-            local hum = LP.Character:FindFirstChildOfClass("Humanoid")
-            if hum then
-                pcall(function()
-                    hum.PlatformStand = false
-                    hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-                    hum:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
-                end)
-            end
-        end
-        Logger.Info("Follow DESACTIVADO")
-    end
-
-    Vars.GetPlayerNames = function()
-        local names = {}
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LP then
-                table.insert(names, p.Name)
-            end
-        end
-        return names
     end
 end
 
@@ -4673,8 +4338,6 @@ do
         if Settings.Sync.Enabled then table_insert(features, "SYNC") end
         if Settings.Advanced.Desync_Enabled then table_insert(features, "DESYNC") end
         if Settings.Advanced.FPSBooster_Enabled then table_insert(features, "FPS") end
-        if Settings.Exploit.FlingEnabled then table_insert(features, "FLING") end
-        if Settings.Exploit.FollowEnabled then table_insert(features, "FOLLOW") end
         local text = "TARGET: " .. (target or "None") .. "  |  " .. (#features > 0 and table.concat(features, "+") or "---")
         Vars.indicatorLabel.Text = text
         Vars.indicatorLabel.TextColor3 = target and Color3.fromRGB(255, 220, 0) or Color3.fromRGB(240, 240, 240)
@@ -4983,7 +4646,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 8.8: SAVE/LOAD con Fuzzymatch
+-- BLOQUE 8.8: SAVE/LOAD
 -- ============================================================
 do
     local HttpService = Vars.HttpService
@@ -5183,9 +4846,6 @@ do
         end},
         {name = "FPSBoost",  get = function() return Settings.Advanced.FPSBooster_Enabled end, set = function(v) Vars.ApplyFPSBooster(v) end},
         {name = "Flight",    get = function() return Settings.Advanced.Flight_Enabled end, set = function(v) Vars.ApplyFlight(v) end},
-        {name = "Fling",     get = function() return Settings.Exploit.FlingEnabled end,  set = function(v)
-            if v then Vars.StartFling() else Vars.StopFling() end
-        end},
     }
 
     local function CreateQuickToggles()
@@ -5205,7 +4865,7 @@ do
 
             local main = Instance.new("Frame")
             main.Size = UDim2.new(0, 100, 0, #QuickTogglesList * 26 + 10)
-            main.Position = UDim2.new(0, 10, 0.5, -160)
+            main.Position = UDim2.new(0, 10, 0.5, -140)
             main.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
             main.BackgroundTransparency = 0.4
             main.BorderSizePixel = 0
@@ -5319,7 +4979,7 @@ do
     local LP = Vars.LP
 
     local Window = ScryuxUI:CreateWindow({
-        Title = "Town Complete v9.9.6",
+        Title = "Town Complete v9.9.7",
         Size = UDim2.new(0, 800, 0, 680),
         Keybind = Settings.Hotkeys.ToggleMenu,
         Theme = "Dark",
@@ -5390,7 +5050,7 @@ do
     ESPInfo:CreateSlider({ Text = "Head Dot Radius", Min = 1, Max = 15, Default = 5, Index = "ESP_HeadDotRadius",
         Callback = function(v) Settings.ESP.HeadDotRadius = v end })
 
-    ESPInfo:CreateToggle({ Text = "Items (limitado a 100)", Default = false, Index = "ESP_Items",
+    ESPInfo:CreateToggle({ Text = "Items", Default = false, Index = "ESP_Items",
         Callback = function(v)
             Settings.ESP.Items = v
             if v then
@@ -5493,7 +5153,7 @@ do
         Callback = function(v) Settings.Aimbot.Enabled = v end })
     ASet:CreateDropdown({ Text = "Method", Options = {"Camera","Mouse"}, Default = "Camera", Index = "Aim_Method",
         Callback = function(v) Settings.Aimbot.Method = v end })
-    ASet:CreateDropdown({ Text = "Priority", Options = {"Distance","FOV","Priority"}, Default = "Distance", Index = "Aim_Priority",
+    ASet:CreateDropdown({ Text = "Priority", Options = {"FOV","Distance","Priority"}, Default = "FOV", Index = "Aim_Priority",
         Callback = function(v) Settings.Aimbot.Priority = v end })
     ASet:CreateToggle({ Text = "Wall Check", Default = false, Index = "Aim_WallCheck",
         Callback = function(v) Settings.Aimbot.WallCheck = v end })
@@ -5521,7 +5181,7 @@ do
         Callback = function(v) Settings.Aimbot.FOV = v end })
     ASet:CreateToggle({ Text = "Show FOV Circle", Default = false, Index = "Aim_ShowFOV",
         Callback = function(v) Settings.Aimbot.ShowFOV = v end })
-    ASet:CreateSlider({ Text = "Smoothness Base", Min = 0, Max = 100, Default = 15, Index = "Aim_SmoothBase",
+    ASet:CreateSlider({ Text = "Smoothness Base (0=snap, 1=smooth)", Min = 0, Max = 100, Default = 15, Index = "Aim_SmoothBase",
         Callback = function(v) Settings.Aimbot.BaseSmoothness = v / 100 end })
     ASet:CreateSlider({ Text = "Smoothness Helper", Min = 0, Max = 100, Default = 15, Index = "Aim_SmoothHelper",
         Callback = function(v) Settings.Aimbot.HelperSmoothness = v / 100 end })
@@ -5539,30 +5199,41 @@ do
         Callback = function(v) Settings.Aimbot.StickyTimeout = v end })
 
     local APMSet = AimbotTab:CreateSection("Aim Part Selection")
-    APMSet:CreateLabel("Smart Nearest: apunta a la parte del cuerpo más cercana al mouse que sea visible")
+    APMSet:CreateLabel("Smart Nearest: selecciona la parte según la posición del mouse en el bbox del enemigo.")
     APMSet:CreateDropdown({ Text = "Aim Part Mode", Options = Vars.BODY_PARTS_ALL, Default = "Smart Nearest", Index = "Aim_AimPartMode",
         Callback = function(v)
             Settings.Aimbot.AimPartMode = v
             Vars.targetTransition.previousPlayer = nil
         end })
 
-    local SmartSet = AimbotTab:CreateSection("Smart Nearest Config")
+    local SmartSet = AimbotTab:CreateSection("Smart Nearest - Zones (flexible)")
+    SmartSet:CreateLabel("Zonas verticales (0-1). Mouse dentro del bbox selecciona la parte.")
+    SmartSet:CreateSlider({ Text = "Head Zone Bottom (Y)", Min = 0.05, Max = 0.5, Default = 0.22, Index = "Smart_HeadZone",
+        Callback = function(v)
+            if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
+            Settings.Aimbot.SmartNearest.HeadZone = v
+        end })
+    SmartSet:CreateSlider({ Text = "Torso Zone Bottom (Y)", Min = 0.3, Max = 0.9, Default = 0.55, Index = "Smart_TorsoZone",
+        Callback = function(v)
+            if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
+            Settings.Aimbot.SmartNearest.TorsoZone = v
+        end })
+    SmartSet:CreateSlider({ Text = "Left Arm Zone X", Min = 0.1, Max = 0.5, Default = 0.35, Index = "Smart_LeftArmX",
+        Callback = function(v)
+            if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
+            Settings.Aimbot.SmartNearest.LeftArmZoneX = v
+        end })
+    SmartSet:CreateSlider({ Text = "Right Arm Zone X", Min = 0.5, Max = 0.9, Default = 0.65, Index = "Smart_RightArmX",
+        Callback = function(v)
+            if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
+            Settings.Aimbot.SmartNearest.RightArmZoneX = v
+        end })
     SmartSet:CreateToggle({ Text = "Require Visible (raycast)", Default = false, Index = "Smart_RequireVis",
         Callback = function(v)
             if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
             Settings.Aimbot.SmartNearest.RequireVisible = v
         end })
-    SmartSet:CreateSlider({ Text = "Head Priority Bonus", Min = 0, Max = 30, Default = 8, Index = "Smart_HeadBonus",
-        Callback = function(v)
-            if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
-            Settings.Aimbot.SmartNearest.HeadBonus = v
-        end })
-    SmartSet:CreateSlider({ Text = "Torso Priority Bonus", Min = 0, Max = 30, Default = 5, Index = "Smart_TorsoBonus",
-        Callback = function(v)
-            if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
-            Settings.Aimbot.SmartNearest.TorsoBonus = v
-        end })
-    SmartSet:CreateSlider({ Text = "Max Screen Dist (px)", Min = 50, Max = 500, Default = 250, Index = "Smart_MaxScreenDist",
+    SmartSet:CreateSlider({ Text = "Max Screen Dist (px) (fallback)", Min = 50, Max = 800, Default = 250, Index = "Smart_MaxScreenDist",
         Callback = function(v)
             if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
             Settings.Aimbot.SmartNearest.MaxScreenDist = v
@@ -5619,7 +5290,7 @@ do
         Callback = function(v) Settings.AimAssist.MaxDistance = v end })
     AASet:CreateSlider({ Text = "Smoothness (0=strong, 1=weak)", Min = 0, Max = 100, Default = 70, Index = "AA_Smoothness",
         Callback = function(v) Settings.AimAssist.Smoothness = v / 100 end })
-    AASet:CreateSlider({ Text = "Max Speed (deg/s) LEGIT", Min = 1, Max = 90, Default = 15, Index = "AA_MaxSpeed",
+    AASet:CreateSlider({ Text = "Max Speed (deg/s)", Min = 1, Max = 90, Default = 15, Index = "AA_MaxSpeed",
         Callback = function(v) Settings.AimAssist.MaxSpeed = v end })
     AASet:CreateToggle({ Text = "Require Mouse Movement", Default = false, Index = "AA_ReqMouse",
         Callback = function(v) Settings.AimAssist.RequireMouseMovement = v end })
@@ -5892,7 +5563,8 @@ do
         Callback = function(v) Settings.Movement.PeekCooldown = v end })
 
     -- ============================================================
-    -- Exploit Tab (con Fling + Follow/Emote v9.9.6)
+    -- Exploit Tab (SIN Fling, SIN Follow, SIN JerkOff)
+    -- Spinbot máx 5000 · Walkspeed máx 5000
     -- ============================================================
     local ExploitTab = Window:CreateTab("Exploit")
     local ExpSet = ExploitTab:CreateSection("Movement")
@@ -5901,15 +5573,20 @@ do
             Settings.Exploit.Spinbot = v
             if v then Vars.StartExploitSpinbot() else Vars.StopExploitSpinbot() end
         end })
-    ExpSet:CreateSlider({ Text = "Spin Speed", Min = 60, Max = 2880, Default = 1000, Index = "Exp_SpinSpeed",
+    ExpSet:CreateSlider({ Text = "Spin Speed (max 5000)", Min = 60, Max = 5000, Default = 1000, Index = "Exp_SpinSpeed",
         Callback = function(v) Settings.Exploit.SpinbotSpeed = v end })
+
     ExpSet:CreateToggle({ Text = "Walkspeed", Default = false, Index = "Exp_Walkspeed",
         Callback = function(v)
             Settings.Exploit.Walkspeed = v
             if v then Vars.StartExploitWalkspeed() else Vars.StopExploitWalkspeed() end
         end })
-    ExpSet:CreateSlider({ Text = "Walkspeed Value", Min = 16, Max = 300, Default = 16, Index = "Exp_WalkspeedValue",
-        Callback = function(v) Settings.Exploit.WalkspeedValue = v end })
+    ExpSet:CreateSlider({ Text = "Walkspeed Value (max 5000)", Min = 16, Max = 5000, Default = 16, Index = "Exp_WalkspeedValue",
+        Callback = function(v)
+            if v > 5000 then v = 5000 end
+            Settings.Exploit.WalkspeedValue = v
+        end })
+
     ExpSet:CreateToggle({ Text = "JumpPower", Default = false, Index = "Exp_JumpPower",
         Callback = function(v)
             Settings.Exploit.JumpPower = v
@@ -5917,11 +5594,13 @@ do
         end })
     ExpSet:CreateSlider({ Text = "JumpPower Value", Min = 50, Max = 300, Default = 50, Index = "Exp_JumpPowerValue",
         Callback = function(v) Settings.Exploit.JumpPowerValue = v end })
+
     ExpSet:CreateToggle({ Text = "Noclip", Default = false, Index = "Exp_Noclip",
         Callback = function(v)
             Settings.Exploit.Noclip = v
             if v then Vars.StartExploitNoclip() else Vars.StopExploitNoclip() end
         end })
+
     ExpSet:CreateToggle({ Text = "Fly", Default = false, Index = "Exp_Fly",
         Callback = function(v)
             Settings.Exploit.Fly = v
@@ -5929,144 +5608,12 @@ do
         end })
     ExpSet:CreateSlider({ Text = "Fly Speed", Min = 10, Max = 300, Default = 50, Index = "Exp_FlySpeed",
         Callback = function(v) Settings.Exploit.FlySpeed = v end })
+
     ExpSet:CreateToggle({ Text = "Teleport to Cursor", Default = false, Index = "Exp_TeleportToCursor",
         Callback = function(v)
             Settings.Exploit.TeleportToCursor = v
             if v then Vars.StartExploitTeleport() else Vars.StopExploitTeleport() end
         end })
-
-    -- FLING UI
-    local FlingSet = ExploitTab:CreateSection("🔥 Fling (v9.9.6)")
-    FlingSet:CreateLabel("Lanza a OTROS jugadores. Nunca te afecta a ti. Techo: 1e24.")
-    FlingSet:CreateToggle({ Text = "🔥 Fling (lanza jugadores)", Default = false, Index = "Exp_Fling",
-        Callback = function(v)
-            if v then Vars.StartFling() else Vars.StopFling() end
-        end })
-    FlingSet:CreateToggle({ Text = "Only Nearest (target actual)", Default = false, Index = "Exp_FlingNearest",
-        Callback = function(v) Settings.Exploit.FlingOnlyNearest = v end })
-    FlingSet:CreateToggle({ Text = "Loop continuo", Default = false, Index = "Exp_FlingLoop",
-        Callback = function(v) Settings.Exploit.FlingLoop = v end })
-    FlingSet:CreateSlider({ Text = "Cooldown (s)", Min = 0.05, Max = 3, Default = 0.15, Index = "Exp_FlingCooldown",
-        Callback = function(v) Settings.Exploit.FlingCooldown = v end })
-    FlingSet:CreateSlider({ Text = "Velocidad (1eX) [5..24]", Min = 5, Max = 24, Default = 24, Index = "Exp_FlingVelocity",
-        Callback = function(v)
-            local exp = math.floor(v)
-            local mag = 10 ^ exp
-            if mag > 1e24 then mag = 1e24 end
-            Settings.Exploit.FlingVelocity = mag
-        end })
-    FlingSet:CreateToggle({ Text = "Transparencia target", Default = false, Index = "Exp_FlingTransparency",
-        Callback = function(v) Settings.Exploit.FlingTransparency = v end })
-    FlingSet:CreateButton("⚡ Fling Once (una vez)", function()
-        if Vars.FlingOnce then pcall(Vars.FlingOnce) end
-    end)
-    FlingSet:CreateLabel("⚠️ 1e24 = crash del target. 1e10-1e15 = fling suave.")
-
-    -- ============================================================
-    -- FOLLOW / EMOTE (v9.9.6)
-    -- ============================================================
-    local FollowSet = ExploitTab:CreateSection("👥 Follow / Emote")
-
-    local followStatusLabel = nil
-    local selectedFollowTarget = nil
-
-    local function RefreshFollowDropdown()
-        local names = Vars.GetPlayerNames and Vars.GetPlayerNames() or {}
-        if #names == 0 then
-            if Window.Notify then Window:Notify("Follow", "No hay otros jugadores", 2, "Warning") end
-            return
-        end
-        local idx = 1
-        if selectedFollowTarget then
-            for i, n in ipairs(names) do
-                if n == selectedFollowTarget then idx = i + 1; break end
-            end
-            if idx > #names then idx = 1 end
-        end
-        selectedFollowTarget = names[idx]
-        Settings.Exploit.FollowTargetName = selectedFollowTarget
-        if followStatusLabel then
-            pcall(function()
-                followStatusLabel:SetText("Target: " .. tostring(selectedFollowTarget))
-            end)
-        end
-    end
-
-    FollowSet:CreateButton("🔄 Ciclar Target (siguiente jugador)", function()
-        RefreshFollowDropdown()
-    end)
-
-    local okLbl, lbl = pcall(function()
-        return FollowSet:CreateLabel("Target: (ninguno)")
-    end)
-    if okLbl and lbl then
-        followStatusLabel = lbl
-    end
-
-    FollowSet:CreateDropdown({
-        Text = "Modo Emote",
-        Options = {"Follow", "TPose", "JerkOff"},
-        Default = "Follow",
-        Index = "Exp_FollowMode",
-        Callback = function(v)
-            Settings.Exploit.FollowMode = v
-            if Settings.Exploit.FollowEnabled and Vars.StartFollowPlayer then
-                Vars.StartFollowPlayer(Settings.Exploit.FollowTargetName)
-            end
-        end
-    })
-
-    FollowSet:CreateToggle({
-        Text = "👥 Activar Follow al target seleccionado",
-        Default = false,
-        Index = "Exp_FollowEnabled",
-        Callback = function(v)
-            if v then
-                if not Settings.Exploit.FollowTargetName then
-                    RefreshFollowDropdown()
-                end
-                if Settings.Exploit.FollowTargetName then
-                    Vars.StartFollowPlayer(Settings.Exploit.FollowTargetName)
-                else
-                    if Window.Notify then
-                        Window:Notify("Follow", "Selecciona un target primero", 2, "Warning")
-                    end
-                end
-            else
-                Vars.StopFollowPlayer()
-            end
-        end
-    })
-
-    FollowSet:CreateSlider({
-        Text = "Offset Lateral (X)",
-        Min = -10, Max = 10, Default = 3,
-        Index = "Exp_FollowOX",
-        Callback = function(v) Settings.Exploit.FollowOffsetX = v end
-    })
-
-    FollowSet:CreateSlider({
-        Text = "Offset Altura (Y)",
-        Min = -5, Max = 10, Default = 0,
-        Index = "Exp_FollowOY",
-        Callback = function(v) Settings.Exploit.FollowOffsetY = v end
-    })
-
-    FollowSet:CreateSlider({
-        Text = "Offset Frontal (Z)",
-        Min = -10, Max = 10, Default = 0,
-        Index = "Exp_FollowOZ",
-        Callback = function(v) Settings.Exploit.FollowOffsetZ = v end
-    })
-
-    FollowSet:CreateToggle({
-        Text = "Mirar siempre al target",
-        Default = false,
-        Index = "Exp_FollowLockRot",
-        Callback = function(v) Settings.Exploit.FollowLockRotation = v end
-    })
-
-    FollowSet:CreateLabel("JerkOff = brazo animado (R6/R15). TPose = brazos en cruz. Follow = solo flota.")
 
     -- ============================================================
     -- Hotkeys Tab
@@ -6175,8 +5722,6 @@ do
             Settings.Exploit.Noclip = false
             Settings.Exploit.Fly = false
             Settings.Exploit.TeleportToCursor = false
-            Settings.Exploit.FlingEnabled = false
-            Settings.Exploit.FollowEnabled = false
             Settings.Aimbot.StickyLock = false
             Settings.Backtrack.Enabled = false
             Settings.Advanced.Desync_Enabled = false
@@ -6208,8 +5753,6 @@ do
             Vars.StopExploitNoclip()
             Vars.StopExploitFly()
             Vars.StopExploitTeleport()
-            if Vars.StopFling then pcall(Vars.StopFling) end
-            if Vars.StopFollowPlayer then pcall(Vars.StopFollowPlayer) end
             Vars.StopHideBody()
             Vars.StopAimAssist()
             Vars.StopCrosshair()
@@ -6277,8 +5820,6 @@ do
         Vars.StopExploitNoclip()
         Vars.StopExploitFly()
         Vars.StopExploitTeleport()
-        if Vars.StopFling then pcall(Vars.StopFling) end
-        if Vars.StopFollowPlayer then pcall(Vars.StopFollowPlayer) end
         Vars.StopHideBody()
         Vars.StopAimAssist()
         Vars.StopCrosshair()
@@ -6348,8 +5889,8 @@ do
         if _env.TownUI_Window then
             pcall(function()
                 _env.TownUI_Window:Notify(
-                    "Town Complete v9.9.6",
-                    "RS = Menu | Y = Helper | End = Panic | Fling + Follow + JerkOff en Exploit",
+                    "Town Complete v9.9.7",
+                    "RS = Menu | Y = Helper | End = Panic",
                     6, "Success"
                 )
             end)
