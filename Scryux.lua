@@ -1,8 +1,7 @@
 --!strict
 -- ============================================================
--- Town Complete v9.9.7 (Scryux UI) - Parte 1/3
--- FPS Booster + Smart Nearest (bbox-based) + Aimbot flexible
--- Sin Fling, sin Follow, sin JerkOff
+-- Town Complete v9.9.8 (Scryux UI) - Parte 1/3
+-- Aimbot Humano + Aim Assist Mejorado + Indicator Blanco
 -- ============================================================
 
 local _env = getgenv and getgenv() or _G
@@ -56,7 +55,7 @@ do
         "https://github.com/scryuxdev/Scryux-Library/raw/main/Scryux-Library.lua?t=" .. tostring(os.time()),
     }
     local CACHE_FILE = "scryux_ui_cache.lua"
-    local CACHE_VERSION = "v9.9.7"
+    local CACHE_VERSION = "v9.9.8"
 
     local function SafeRequest(url)
         if Has("request") then
@@ -429,14 +428,12 @@ do
                 DeadzoneRadius = 0.05,
             },
             SmartNearest = {
-                -- Nuevo: zonas basadas en bounding box del personaje
-                HeadZone = 0.22,          -- top 22% = cabeza
-                TorsoZone = 0.55,         -- 22-55% = torso
-                LeftArmZoneX = 0.35,      -- izquierda <35%
-                RightArmZoneX = 0.65,     -- derecha >65%
+                HeadZone = 0.22,
+                TorsoZone = 0.55,
+                LeftArmZoneX = 0.35,
+                RightArmZoneX = 0.65,
                 RequireVisible = false,
                 MaxScreenDist = 250,
-                -- Bonus opcional (0 = puramente zona)
                 HeadBonus = 0,
                 TorsoBonus = 0,
             },
@@ -451,6 +448,14 @@ do
             Priority = "FOV",
             StickyLock = false, StickyTimeout = 2,
             RequireGun = false,
+            -- ✅ Human Mode (v9.9.8)
+            HumanMode = false,
+            SwitchCooldown = 0.45,
+            SwitchRange = 40,
+            Humanize = true,
+            JitterAmount = 0.35,
+            JitterSpeed = 12,
+            EaseStyle = "EaseOut",
             BonePriority = {
                 Head = 1.0, UpperTorso = 0.7, LowerTorso = 0.6,
                 HumanoidRootPart = 0.5,
@@ -465,16 +470,26 @@ do
             Enabled = false, FOV = 30, ShowFOV = false,
             FOVColor = Color3.fromRGB(0, 255, 255), FOVThickness = 1,
             MaxDistance = 500,
-            Smoothness = 0.7,
-            MaxSpeed = 15,
+            -- ✅ v9.9.8: control ampliado
+            Smoothness = 0.5,
+            Strength = 0.6,
+            MaxSpeed = 30,
+            Stickiness = 0.3,
+            SnapRadius = 3,
             RequireMouseMovement = false,
             MouseMovementThreshold = 0.5,
             MouseStrength = 0.4,
             MovementMemory = 0.2,
             TeamCheck = false, IgnorePassive = false, WallCheck = false,
-            Visible = true, UseMouse = false, Priority = "Distance",
+            Visible = true, UseMouse = false, Priority = "FOV",
             UsePrediction = false, PredictionAmount = 0.13,
             UsePingPrediction = false, Selective = false,
+            -- ✅ Human Assist
+            HumanMode = true,
+            SwitchCooldown = 0.5,
+            SwitchRange = 30,
+            JitterAmount = 0.25,
+            EaseStyle = "EaseInOut",
             SmartNearest = {
                 HeadZone = 0.22,
                 TorsoZone = 0.55,
@@ -900,9 +915,7 @@ do
     end
 
     -- ============================================================
-    -- ✅ NUEVO SMART NEAREST (v9.9.7)
-    -- Basado en bounding-box del personaje en pantalla + zonas.
-    -- Mucho más smooth: el mouse manda la selección de parte.
+    -- SMART NEAREST (bbox-based) v9.9.7
     -- ============================================================
     local function GetSmartNearestVisiblePart(player, cam, screenPos, fovRadius, requireVisible, headBonus, torsoBonus)
         if not player or not player.Character then return nil end
@@ -910,10 +923,8 @@ do
         local rigType = GetRigType(char)
         if not rigType then return nil end
 
-        -- 1. Bounding box del target en pantalla
         local boxPos, boxSize, ok = GetBoundingVectors(char)
         if not ok or not boxPos or not boxSize then
-            -- fallback: usar lógica antigua basada en distancia
             local parts = rigType == "R15" and SMART_PARTS_R15 or SMART_PARTS_R6
             local best, bestScore = nil, math.huge
             local maxDist = 250
@@ -932,11 +943,9 @@ do
             return best
         end
 
-        -- 2. Normalizar la posición del mouse dentro del bounding box
         local relX = (screenPos.X - boxPos.X) / math.max(boxSize.X, 1)
         local relY = (screenPos.Y - boxPos.Y) / math.max(boxSize.Y, 1)
 
-        -- clamp por si el mouse está fuera del bbox
         if relX < -0.3 or relX > 1.3 or relY < -0.3 or relY > 1.3 then
             return nil
         end
@@ -947,7 +956,6 @@ do
         local leftArmX = cfg.LeftArmZoneX or 0.35
         local rightArmX = cfg.RightArmZoneX or 0.65
 
-        -- 3. Selección por zona (smooth: sigue al mouse)
         local partName
         if rigType == "R15" then
             if relY < headZone then
@@ -962,7 +970,6 @@ do
                 else partName = "LowerTorso" end
             end
         else
-            -- R6
             if relY < headZone then
                 partName = "Head"
             elseif relY < torsoZone then
@@ -981,12 +988,10 @@ do
             part = char:FindFirstChild("Head") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
         end
 
-        -- 4. Verificación de visibilidad (opcional)
         if requireVisible and part then
             local myHead = LP.Character and LP.Character:FindFirstChild("Head")
             local origin = myHead and myHead.Position or cam.CFrame.Position
             if not IsPartVisibleFrom(part, origin, char, cam) then
-                -- Probar la parte visible más cercana al mouse
                 local parts = rigType == "R15" and SMART_PARTS_R15 or SMART_PARTS_R6
                 local best, bestScore = nil, math.huge
                 for _, pn in ipairs(parts) do
@@ -2520,7 +2525,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 7: Target Manager + Aimbot + Aim Assist
+-- BLOQUE 7: Target Manager + Aimbot (Humano) + Aim Assist (mejorado)
 -- ============================================================
 do
     local RunService = Vars.RunService
@@ -2651,7 +2656,6 @@ do
             Vars.currentHybridPartName = part and part.Name or nil
             return part
         elseif mode == "Head" then
-            -- ✅ FIX: re-evaluar siempre la parte según el estado actual
             return char:FindFirstChild("Head")
         elseif mode == "Torso" then
             return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso") or char:FindFirstChild("Head")
@@ -2898,7 +2902,22 @@ do
     end
     Vars.CheckAnti360 = CheckAnti360
 
+    -- ✅ Helper: easing
+    local function GetEasedFraction(t, style)
+        t = math_clamp(t, 0, 1)
+        if style == "Linear" then
+            return t
+        elseif style == "EaseOut" then
+            return 1 - (1 - t) * (1 - t) * (1 - t)
+        else -- EaseInOut
+            return t < 0.5 and (2 * t * t) or (1 - ((-2 * t + 2) ^ 2) / 2)
+        end
+    end
+
     local lastFrameTime = 0
+    local lastSwitchTime = 0
+    local jitterSeed = 0
+
     local function MainAimbotLoop()
         if Vars.isScriptUnloaded or not Settings.Aimbot.Enabled then return end
         if Vars.isLocalDead or IsMenuOpen() then return end
@@ -2917,6 +2936,7 @@ do
         local dt = now - lastFrameTime
         lastFrameTime = now
         if dt > 0.5 then dt = 0.5 end
+        if dt <= 0 then return end
 
         local held
         if Settings.Aimbot.AimKeyType == "Key" then held = Vars.aimKeyHeld
@@ -2932,8 +2952,6 @@ do
             return
         end
 
-        -- ✅ FIX: el aim part se reevalúa cada frame para que siga al mouse
-        -- (importante en modo "Head"/"Torso"/Smart Nearest cuando mueves el mouse)
         if TargetManager:GetCurrentTarget() then
             TargetManager:UpdateTarget()
         end
@@ -2954,17 +2972,39 @@ do
             Vars.stickyTarget = nil
         end
 
-        if not TargetManager:GetCurrentTarget() then
-            local nt = TargetManager:GetBestTarget()
-            if nt then
-                TargetManager:LockTarget(nt)
-                local cam = GetCamera()
-                Vars.targetTransition.active = true
-                Vars.targetTransition.startCFrame = cam.CFrame
-                Vars.targetTransition.targetCFrame = CFrame_new(cam.CFrame.Position, nt.part.Position)
-                Vars.targetTransition.progress = 0
-                Vars.targetTransition.duration = Vars.TARGET_TRANSITION_DURATION
-                Vars.targetTransition.previousPlayer = nt.player
+        -- ✅ HUMAN MODE: switch con cooldown y rango
+        local current = TargetManager:GetCurrentTarget()
+        local canSwitch = (not current) or (now - lastSwitchTime >= (Settings.Aimbot.SwitchCooldown or 0.45))
+        local shouldLookForNew = (not current) or (Settings.Aimbot.HumanMode and canSwitch)
+        if shouldLookForNew then
+            local best = TargetManager:GetBestTarget()
+            if best then
+                local keepCurrent = false
+                if current and Settings.Aimbot.HumanMode and Settings.Aimbot.SwitchRange then
+                    local cam = GetCamera()
+                    if current.part and current.part.Parent and best.part and best.part.Parent then
+                        local aPos, onA = cam:WorldToViewportPoint(current.part.Position)
+                        local bPos, onB = cam:WorldToViewportPoint(best.part.Position)
+                        if onA and onB then
+                            local dx = aPos.X - bPos.X
+                            local dy = aPos.Y - bPos.Y
+                            if math.sqrt(dx*dx + dy*dy) < (Settings.Aimbot.SwitchRange or 40) then
+                                keepCurrent = true
+                            end
+                        end
+                    end
+                end
+                if not keepCurrent then
+                    TargetManager:LockTarget(best)
+                    lastSwitchTime = now
+                    local cam = GetCamera()
+                    Vars.targetTransition.active = true
+                    Vars.targetTransition.startCFrame = cam.CFrame
+                    Vars.targetTransition.targetCFrame = CFrame_new(cam.CFrame.Position, best.part.Position)
+                    Vars.targetTransition.progress = 0
+                    Vars.targetTransition.duration = Vars.TARGET_TRANSITION_DURATION
+                    Vars.targetTransition.previousPlayer = current and current.player or nil
+                end
             end
         end
 
@@ -2988,7 +3028,7 @@ do
                 Vars.targetTransition.active = false
             end
             local cam = GetCamera()
-            local eased = 1 - (1 - Vars.targetTransition.progress) ^ 3
+            local eased = GetEasedFraction(Vars.targetTransition.progress, Settings.Aimbot.EaseStyle)
             local newTargetCF = CFrame_new(cam.CFrame.Position, ap.Position)
             Vars.targetTransition.targetCFrame = newTargetCF
             pcall(function()
@@ -3007,6 +3047,16 @@ do
             if root then
                 aimPos = PredictPosition(root, Settings.Aimbot.PredictionAmount, Settings.Aimbot.UsePingPrediction)
             end
+        end
+
+        -- ✅ Humanize: micro-jitter
+        if Settings.Aimbot.Humanize then
+            jitterSeed = jitterSeed + dt * (Settings.Aimbot.JitterSpeed or 12)
+            local jit = Settings.Aimbot.JitterAmount or 0.35
+            local ox = math.sin(jitterSeed * 6.28) * jit * 0.01
+            local oy = math.cos(jitterSeed * 5.13) * jit * 0.01
+            local oz = math.sin(jitterSeed * 7.71) * jit * 0.01
+            aimPos = aimPos + V3(ox, oy, oz)
         end
 
         local sm = Vars.aimbotHelperActive and Settings.Aimbot.HelperSmoothness or Settings.Aimbot.BaseSmoothness
@@ -3075,7 +3125,20 @@ do
     end)
     Vars.GetFOVCircle = function() return fovCircle end
 
+    -- ✅ Indicator blanco en la parte seleccionada (v9.9.8)
     local targetIndicator = nil
+    local INDICATOR_RADIUS = {
+        Head = 8,
+        UpperTorso = 11, LowerTorso = 10, Torso = 11, HumanoidRootPart = 11,
+        LeftUpperArm = 6, RightUpperArm = 6,
+        LeftLowerArm = 5, RightLowerArm = 5,
+        LeftHand = 4, RightHand = 4,
+        ["Left Arm"] = 6, ["Right Arm"] = 6,
+        LeftUpperLeg = 8, RightUpperLeg = 8,
+        LeftLowerLeg = 7, RightLowerLeg = 7,
+        LeftFoot = 5, RightFoot = 5,
+        ["Left Leg"] = 8, ["Right Leg"] = 8,
+    }
     Vars.targetIndicatorConn = RunService.RenderStepped:Connect(function()
         if Vars.isScriptUnloaded then return end
         if not Settings.Aimbot.Enabled then
@@ -3086,7 +3149,8 @@ do
             targetIndicator = Drawing.new("Circle")
             targetIndicator.Filled = false
             targetIndicator.Thickness = 2
-            targetIndicator.Color = Color3.fromRGB(255, 0, 0)
+            targetIndicator.Color = Color3.fromRGB(255, 255, 255)
+            targetIndicator.Transparency = 1
             targetIndicator.Visible = false
         end
         local t = TargetManager:GetCurrentTarget()
@@ -3094,10 +3158,14 @@ do
             local sp, onScreen = GetCamera():WorldToViewportPoint(t.part.Position)
             if onScreen then
                 targetIndicator.Position = V2(sp.X, sp.Y)
-                targetIndicator.Radius = 10
+                targetIndicator.Radius = INDICATOR_RADIUS[t.part.Name] or 8
                 targetIndicator.Visible = true
-            else targetIndicator.Visible = false end
-        else targetIndicator.Visible = false end
+            else
+                targetIndicator.Visible = false
+            end
+        else
+            targetIndicator.Visible = false
+        end
     end)
     Vars.GetTargetIndicator = function() return targetIndicator end
 
@@ -3120,7 +3188,12 @@ do
         if input.KeyCode == Settings.Aimbot.AimKey then Vars.aimKeyHeld = false end
     end)
 
+    -- ============================================================
+    -- AIM ASSIST v9.9.8 (mejorado)
+    -- ============================================================
     local aimAssistEngaged = false
+    local lastAASwitch = 0
+    local aaJitterSeed = 0
 
     local function GetAimAssistTarget()
         if not LP.Character then return nil end
@@ -3208,6 +3281,14 @@ do
             return
         end
 
+        if Settings.AimAssist.HumanMode and aimAssistEngaged then
+            if (now - lastAASwitch) < (Settings.AimAssist.SwitchCooldown or 0.5) then
+                -- mantiene target actual
+            else
+                lastAASwitch = now
+            end
+        end
+
         local cam = GetCamera()
         if not cam then return end
 
@@ -3217,12 +3298,22 @@ do
         if dt <= 0 then return end
 
         local aimPos = target.targetPos
+
+        if Settings.AimAssist.JitterAmount and Settings.AimAssist.JitterAmount > 0 then
+            aaJitterSeed = aaJitterSeed + dt * 14
+            local j = Settings.AimAssist.JitterAmount
+            aimPos = aimPos + V3(math.sin(aaJitterSeed * 6.28) * j * 0.01,
+                                  math.cos(aaJitterSeed * 5.31) * j * 0.01,
+                                  0)
+        end
+
         local currentCFrame = cam.CFrame
         local targetCFrame = CFrame_new(currentCFrame.Position, aimPos)
 
         local angleDelta = currentCFrame.LookVector:Angle(targetCFrame.LookVector)
 
-        local maxSpeedDeg = Settings.AimAssist.MaxSpeed * (1 - Settings.AimAssist.Smoothness)
+        local strength = Settings.AimAssist.Strength or 0.6
+        local maxSpeedDeg = Settings.AimAssist.MaxSpeed * (1 - Settings.AimAssist.Smoothness) * strength
         local maxSpeedRad = math_rad(math.max(maxSpeedDeg, 0.5))
         local maxRotationThisFrame = maxSpeedRad * dt
 
@@ -3257,6 +3348,7 @@ do
         Vars.aimAssistActive = true
         Vars.aimAssistLastFrame = os_clock()
         aimAssistEngaged = false
+        lastAASwitch = 0
         Vars.aimAssistLastMousePos = UserInputService:GetMouseLocation()
         Vars.aimAssistLastMovementTime = 0
         Vars.aimAssistConnection = RunService.RenderStepped:Connect(AimAssistLoop)
@@ -3306,7 +3398,6 @@ end
 
 -- ============================================================
 -- BLOQUE 8: Sync + Desync + Anti-Fall + Strafe + Exploits
--- (SIN Fling, SIN Follow, SIN JerkOff)
 -- ============================================================
 do
     local Players = Vars.Players
@@ -3710,9 +3801,7 @@ do
     end
 
     -- ============================================================
-    -- ✅ WALKSPEED arreglado (v9.9.7)
-    -- Reconecta en CharacterAdded para no dejar de aplicar tras respawn.
-    -- Usa Stepped para evitar conflictos con el motor.
+    -- WALKSPEED arreglado (máx 5000, reconecta en CharacterAdded)
     -- ============================================================
     local function ApplyWalkspeedTick()
         if Vars.isScriptUnloaded then return end
@@ -3732,13 +3821,11 @@ do
     Vars.StartExploitWalkspeed = function()
         if Vars.exploitWalkspeedConn then return end
         Vars.exploitWalkspeedConn = RunService.Stepped:Connect(ApplyWalkspeedTick)
-        -- ✅ Reconectar en respawn
         if Vars.exploitWalkspeedCharConn then
             pcall(function() Vars.exploitWalkspeedCharConn:Disconnect() end)
         end
         Vars.exploitWalkspeedCharConn = LP.CharacterAdded:Connect(function(char)
             task.wait(0.3)
-            -- Re-aplicar tras respawn si sigue activo
             if Settings.Exploit.Walkspeed then
                 local hum = char:FindFirstChildOfClass("Humanoid")
                 if hum then
@@ -4979,7 +5066,7 @@ do
     local LP = Vars.LP
 
     local Window = ScryuxUI:CreateWindow({
-        Title = "Town Complete v9.9.7",
+        Title = "Town Complete v9.9.8",
         Size = UDim2.new(0, 800, 0, 680),
         Keybind = Settings.Hotkeys.ToggleMenu,
         Theme = "Dark",
@@ -5198,6 +5285,25 @@ do
     ASet:CreateSlider({ Text = "Sticky Timeout (s)", Min = 0.5, Max = 10, Default = 2, Index = "Aim_StickyTimeout",
         Callback = function(v) Settings.Aimbot.StickyTimeout = v end })
 
+    -- ✅ Human Aimbot (v9.9.8)
+    ASet:CreateLabel("─── Modo Humano ───")
+    ASet:CreateToggle({ Text = "Human Mode (switch entre targets)", Default = false, Index = "Aim_HumanMode",
+        Callback = function(v) Settings.Aimbot.HumanMode = v end })
+    ASet:CreateSlider({ Text = "Switch Cooldown (s)", Min = 0.1, Max = 2, Default = 0.45, Index = "Aim_SwitchCooldown",
+        Callback = function(v) Settings.Aimbot.SwitchCooldown = v end })
+    ASet:CreateSlider({ Text = "Switch Range (px)", Min = 5, Max = 200, Default = 40, Index = "Aim_SwitchRange",
+        Callback = function(v) Settings.Aimbot.SwitchRange = v end })
+    ASet:CreateToggle({ Text = "Humanize (micro jitter)", Default = true, Index = "Aim_Humanize",
+        Callback = function(v) Settings.Aimbot.Humanize = v end })
+    ASet:CreateSlider({ Text = "Jitter Amount", Min = 0, Max = 2, Default = 0.35, Index = "Aim_Jitter",
+        Callback = function(v) Settings.Aimbot.JitterAmount = v end })
+    ASet:CreateSlider({ Text = "Jitter Speed (Hz)", Min = 1, Max = 30, Default = 12, Index = "Aim_JitterSpeed",
+        Callback = function(v) Settings.Aimbot.JitterSpeed = v end })
+    ASet:CreateDropdown({ Text = "Ease Style", Options = {"Linear", "EaseOut", "EaseInOut"}, Default = "EaseOut", Index = "Aim_EaseStyle",
+        Callback = function(v) Settings.Aimbot.EaseStyle = v end })
+    ASet:CreateSlider({ Text = "Transition Duration (s)", Min = 0.05, Max = 0.5, Default = 0.15, Index = "Aim_TransDur",
+        Callback = function(v) Vars.TARGET_TRANSITION_DURATION = v end })
+
     local APMSet = AimbotTab:CreateSection("Aim Part Selection")
     APMSet:CreateLabel("Smart Nearest: selecciona la parte según la posición del mouse en el bbox del enemigo.")
     APMSet:CreateDropdown({ Text = "Aim Part Mode", Options = Vars.BODY_PARTS_ALL, Default = "Smart Nearest", Index = "Aim_AimPartMode",
@@ -5270,44 +5376,67 @@ do
     end)
 
     -- ============================================================
-    -- Aim Assist Tab
+    -- Aim Assist Tab (v9.9.8 mejorado)
     -- ============================================================
     local AimAssistTab = Window:CreateTab("Aim Assist")
     local AASet = AimAssistTab:CreateSection("Aim Assist (Legit)")
-    AASet:CreateLabel("Legit assist: solo ayuda si mueves el mouse")
-    AASet:CreateToggle({ Text = "Aim Assist Master", Default = false, Index = "AA_Enabled",
+    AASet:CreateLabel("Asistencia suave: sólo tira del aim hacia el enemigo en FOV.")
+    AASet:CreateToggle({ Text = "🎯 Aim Assist Master", Default = false, Index = "AA_Enabled",
         Callback = function(v)
             Settings.AimAssist.Enabled = v
             if v then Vars.StartAimAssist() else Vars.StopAimAssist() end
         end })
-    AASet:CreateSlider({ Text = "FOV", Min = 1, Max = 360, Default = 30, Index = "AA_FOV",
+
+    local AASection_FOV = AimAssistTab:CreateSection("Zona de asistencia")
+    AASection_FOV:CreateSlider({ Text = "FOV (grados) - tamaño del círculo", Min = 1, Max = 360, Default = 30, Index = "AA_FOV",
         Callback = function(v) Settings.AimAssist.FOV = v end })
-    AASet:CreateToggle({ Text = "Show FOV Circle", Default = false, Index = "AA_ShowFOV",
+    AASection_FOV:CreateToggle({ Text = "Mostrar círculo FOV", Default = false, Index = "AA_ShowFOV",
         Callback = function(v) Settings.AimAssist.ShowFOV = v end })
-    AASet:CreateColorpicker({ Text = "FOV Color", Default = Color3.fromRGB(0, 255, 255), Index = "AA_FOVColor",
+    AASection_FOV:CreateColorpicker({ Text = "Color del círculo", Default = Color3.fromRGB(0, 255, 255), Index = "AA_FOVColor",
         Callback = function(c) Settings.AimAssist.FOVColor = c end })
-    AASet:CreateSlider({ Text = "Max Distance", Min = 50, Max = 2000, Default = 500, Index = "AA_MaxDist",
+    AASection_FOV:CreateSlider({ Text = "Distancia máxima (studs)", Min = 50, Max = 2000, Default = 500, Index = "AA_MaxDist",
         Callback = function(v) Settings.AimAssist.MaxDistance = v end })
-    AASet:CreateSlider({ Text = "Smoothness (0=strong, 1=weak)", Min = 0, Max = 100, Default = 70, Index = "AA_Smoothness",
+
+    local AASection_Feel = AimAssistTab:CreateSection("Sensación (feel)")
+    AASection_Feel:CreateLabel("Smoothness: 0 = imán · 1 = casi sin ayuda")
+    AASection_Feel:CreateSlider({ Text = "Smoothness", Min = 0, Max = 100, Default = 50, Index = "AA_Smoothness",
         Callback = function(v) Settings.AimAssist.Smoothness = v / 100 end })
-    AASet:CreateSlider({ Text = "Max Speed (deg/s)", Min = 1, Max = 90, Default = 15, Index = "AA_MaxSpeed",
+    AASection_Feel:CreateLabel("Strength: cuánto tira hacia el enemigo")
+    AASection_Feel:CreateSlider({ Text = "Strength", Min = 0, Max = 100, Default = 60, Index = "AA_Strength",
+        Callback = function(v) Settings.AimAssist.Strength = v / 100 end })
+    AASection_Feel:CreateLabel("Max Speed: velocidad máx de rotación (grados/s)")
+    AASection_Feel:CreateSlider({ Text = "Max Speed (deg/s)", Min = 1, Max = 180, Default = 30, Index = "AA_MaxSpeed",
         Callback = function(v) Settings.AimAssist.MaxSpeed = v end })
-    AASet:CreateToggle({ Text = "Require Mouse Movement", Default = false, Index = "AA_ReqMouse",
+
+    local AASection_Human = AimAssistTab:CreateSection("Humano")
+    AASection_Human:CreateToggle({ Text = "Human Mode (switch suave entre targets)", Default = true, Index = "AA_HumanMode",
+        Callback = function(v) Settings.AimAssist.HumanMode = v end })
+    AASection_Human:CreateSlider({ Text = "Switch Cooldown (s)", Min = 0.1, Max = 2, Default = 0.5, Index = "AA_SwitchCooldown",
+        Callback = function(v) Settings.AimAssist.SwitchCooldown = v end })
+    AASection_Human:CreateSlider({ Text = "Switch Range (px)", Min = 5, Max = 200, Default = 30, Index = "AA_SwitchRange",
+        Callback = function(v) Settings.AimAssist.SwitchRange = v end })
+    AASection_Human:CreateSlider({ Text = "Jitter Amount", Min = 0, Max = 2, Default = 0.25, Index = "AA_Jitter",
+        Callback = function(v) Settings.AimAssist.JitterAmount = v end })
+
+    local AASection_Mouse = AimAssistTab:CreateSection("Mouse")
+    AASection_Mouse:CreateToggle({ Text = "Require Mouse Movement (solo si mueves)", Default = false, Index = "AA_ReqMouse",
         Callback = function(v) Settings.AimAssist.RequireMouseMovement = v end })
-    AASet:CreateSlider({ Text = "Mouse Movement Threshold (px)", Min = 0, Max = 5, Default = 0.5, Index = "AA_MouseThreshold",
+    AASection_Mouse:CreateSlider({ Text = "Mouse Threshold (px)", Min = 0, Max = 5, Default = 0.5, Index = "AA_MouseThreshold",
         Callback = function(v) Settings.AimAssist.MouseMovementThreshold = v end })
-    AASet:CreateSlider({ Text = "Mouse Strength (0-1)", Min = 0, Max = 1, Default = 0.4, Index = "AA_MouseStrength",
+    AASection_Mouse:CreateSlider({ Text = "Mouse Strength (0-1)", Min = 0, Max = 1, Default = 0.4, Index = "AA_MouseStrength",
         Callback = function(v) Settings.AimAssist.MouseStrength = v end })
-    AASet:CreateSlider({ Text = "Movement Memory (s)", Min = 0.05, Max = 1, Default = 0.2, Index = "AA_MovementMemory",
+    AASection_Mouse:CreateSlider({ Text = "Movement Memory (s)", Min = 0.05, Max = 1, Default = 0.2, Index = "AA_MovementMemory",
         Callback = function(v) Settings.AimAssist.MovementMemory = v end })
-    AASet:CreateToggle({ Text = "Team Check", Default = false, Index = "AA_TeamCheck",
-        Callback = function(v) Settings.AimAssist.TeamCheck = v end })
-    AASet:CreateToggle({ Text = "Ignore Passive", Default = false, Index = "AA_IgnorePassive",
-        Callback = function(v) Settings.AimAssist.IgnorePassive = v end })
-    AASet:CreateToggle({ Text = "Wall Check", Default = false, Index = "AA_WallCheck",
-        Callback = function(v) Settings.AimAssist.WallCheck = v end })
-    AASet:CreateDropdown({ Text = "Method", Options = {"Camera", "Mouse"}, Default = "Camera", Index = "AA_Method",
+    AASection_Mouse:CreateDropdown({ Text = "Método", Options = {"Camera", "Mouse"}, Default = "Camera", Index = "AA_Method",
         Callback = function(v) Settings.AimAssist.UseMouse = (v == "Mouse") end })
+
+    local AASection_Filters = AimAssistTab:CreateSection("Filtros")
+    AASection_Filters:CreateToggle({ Text = "Team Check", Default = false, Index = "AA_TeamCheck",
+        Callback = function(v) Settings.AimAssist.TeamCheck = v end })
+    AASection_Filters:CreateToggle({ Text = "Ignore Passive", Default = false, Index = "AA_IgnorePassive",
+        Callback = function(v) Settings.AimAssist.IgnorePassive = v end })
+    AASection_Filters:CreateToggle({ Text = "Wall Check", Default = false, Index = "AA_WallCheck",
+        Callback = function(v) Settings.AimAssist.WallCheck = v end })
 
     -- ============================================================
     -- Weapon Mods
@@ -5563,8 +5692,7 @@ do
         Callback = function(v) Settings.Movement.PeekCooldown = v end })
 
     -- ============================================================
-    -- Exploit Tab (SIN Fling, SIN Follow, SIN JerkOff)
-    -- Spinbot máx 5000 · Walkspeed máx 5000
+    -- Exploit Tab (Spinbot max 5000, Walkspeed max 5000)
     -- ============================================================
     local ExploitTab = Window:CreateTab("Exploit")
     local ExpSet = ExploitTab:CreateSection("Movement")
@@ -5889,8 +6017,8 @@ do
         if _env.TownUI_Window then
             pcall(function()
                 _env.TownUI_Window:Notify(
-                    "Town Complete v9.9.7",
-                    "RS = Menu | Y = Helper | End = Panic",
+                    "Town Complete v9.9.8",
+                    "RS = Menu | Y = Helper | End = Panic | Aimbot + Aim Assist mejorados",
                     6, "Success"
                 )
             end)
