@@ -1,7 +1,7 @@
 --!strict
 -- ============================================================
--- Town Complete v9.9.1 (Scryux UI) - Parte 1/3
--- FIX: AntiKick crash (removed global hookmetamethod)
+-- Town Complete v9.9.2 (Scryux UI) - Parte 1/3
+-- FIX: AssemblyLinearAcceleration + URLs corregidas + Items limit
 -- ============================================================
 
 local _env = getgenv and getgenv() or _G
@@ -33,7 +33,7 @@ _env.print = _noop
 _env.warn  = _noop
 
 -- ============================================================
--- BLOQUE 1: Helpers + Carga de Scryux UI
+-- BLOQUE 1: Helpers + Carga de Scryux UI (URLs CORREGIDAS)
 -- ============================================================
 local ScryuxUI
 do
@@ -49,12 +49,17 @@ do
     end
     _env.TownComplete_Loaded = true
 
+    -- ✅ FIX v9.9.2: URLs CORREGIDAS (scryuxdev, no player2dwhite)
     local SCRYUX_URLS = {
-        "https://cdn.jsdelivr.net/gh/player2dwhite-tech/Scryux-Library@main/Scryux-Library.lua",
-        "https://raw.githubusercontent.com/player2dwhite-tech/Scryux-Library/main/Scryux-Library.lua",
+        -- Raw GitHub (más rápido, siempre actualizado)
+        "https://raw.githubusercontent.com/scryuxdev/Scryux-Library/main/Scryux-Library.lua?t=" .. tostring(os.time()),
+        -- jsDelivr CDN (fallback)
+        "https://cdn.jsdelivr.net/gh/scryuxdev/Scryux-Library@main/Scryux-Library.lua?t=" .. tostring(os.time()),
+        -- GitHub directo (último recurso)
+        "https://github.com/scryuxdev/Scryux-Library/raw/main/Scryux-Library.lua?t=" .. tostring(os.time()),
     }
     local CACHE_FILE = "scryux_ui_cache.lua"
-    local CACHE_VERSION = "v9.9.1"
+    local CACHE_VERSION = "v9.9.2"
 
     local function SafeRequest(url)
         if Has("request") then
@@ -129,7 +134,7 @@ end
 if not ScryuxUI then
     _env.print = realPrint
     _env.warn  = realWarn
-    Logger.Error("No se pudo cargar Scryux UI")
+    Logger.Error("No se pudo cargar Scryux UI — verifica la URL: https://github.com/scryuxdev/Scryux-Library")
     return
 end
 
@@ -314,7 +319,6 @@ do
 
     Vars.syncData = nil
 
-    -- Desync (Seat + Weld)
     Vars.desyncActive = false
     Vars.desyncSeat = nil
     Vars.desyncWeld = nil
@@ -323,10 +327,8 @@ do
     Vars.desyncHiddenPos = nil
     Vars.desyncCharConn = nil
 
-    -- ✅ AntiKick (safe)
     Vars.antikickOriginal = nil
 
-    -- Indicator
     Vars.indicatorGui = nil
     Vars.indicatorFrame = nil
     Vars.indicatorLabel = nil
@@ -335,41 +337,32 @@ do
     Vars.indicatorDragStart = nil
     Vars.indicatorStartPos = nil
 
-    -- Quick Toggles
     Vars.quickTogglesGui = nil
     Vars.qtConn = nil
 
-    -- Hitbox Visualizer
     Vars.hitboxVisualizers = {}
 
-    -- World
     Vars.worldXrayParts = {}
     Vars.worldXrayActive = false
     Vars.loopFireLast = 0
 
-    -- Camera
     Vars.camYConn = nil
     Vars.cframeViewConn = nil
     Vars.camYOriginal = nil
 
-    -- World Proximity / Loop Fire
     Vars.worldProximityConn = nil
     Vars.loopFireConn = nil
 
-    -- Truss
     Vars.trussPart = nil
     Vars.trussConn = nil
 
-    -- Airwalk
     Vars.airwalkPart = nil
     Vars.airwalkConn = nil
 
-    -- Flight
     Vars.flightBodyGyro = nil
     Vars.flightBodyVelocity = nil
     Vars.flightConn = nil
 
-    -- Autorespawn
     Vars.autorespawnConns = {}
     Vars.autorespawnDeathPos = nil
 
@@ -399,6 +392,7 @@ do
             ItemColor = Color3.fromRGB(255, 165, 0),
             ItemTextSize = 16,
             ItemMaxDistance = 500,
+            ItemMaxCount = 100, -- ✅ NUEVO: límite de items para no crashear
             Weapons = false,
             WeaponColor = Color3.fromRGB(255, 0, 255),
             WeaponTextSize = 16,
@@ -482,7 +476,6 @@ do
             CrosshairTransparency = 1,
             CrosshairGap = 4,
         },
-        -- ✅ SYNC (Booster de red)
         Sync = { Enabled = false, TryFFlagFallback = false, AutoDisableOnLowFPS = false },
         HUD = { Enabled = true, ShowFPS = true, ShowPing = true },
         Performance = { ESPUpdateRate = 0.03, SkeletonUpdateRate = 0.04 },
@@ -523,70 +516,42 @@ do
             BlitzSpeed = 1000, BlitzFireRate = 0.01,
             BlitzTeleportRange = 5000,
         },
-        -- ============================================
-        -- v9.9.1 ADVANCED (con FIX AntiKick)
-        -- ============================================
         Advanced = {
-            -- ✅ FIX: AntiKick DESACTIVADO por defecto (crash en Solara con __namecall)
             AntiKick = false,
-
-            -- Hitbox avanzado
             HitChance = 100,
             HeadshotChance = 100,
             STS_Distance = 5,
             ScaleToScreen = false,
             MaxExpansion = 8,
-
-            -- Hitbox Visualizer
             HitboxViz_Enabled = false,
             HitboxViz_Shape = "Block",
             HitboxViz_Material = "Neon",
             HitboxViz_Transparency = 0.6,
             HitboxViz_Color = Color3.fromRGB(255, 0, 0),
             HitboxViz_Gap = 0.4,
-
-            -- Indicator UI
             Indicator_Enabled = false,
             Indicator_Draggable = true,
-
-            -- Quick Toggles
             QT_Enabled = false,
             QT_Draggable = true,
-
-            -- Camera Y Offset
             CamY_Enabled = false,
             CamY_Offset = 0,
-
-            -- CFrame View
             CFrameView_Enabled = false,
-
-            -- World Proximity
             WP_Enabled = false,
             WP_HoldDuration = 0,
             WP_MaxActivation = 100,
-
-            -- World Xray
             WX_Enabled = false,
             WX_Transparency = 0.5,
             WX_Blacklist = {"Humanoid"},
-
-            -- Loop Fire
             LF_Enabled = false,
             LF_Interval = 1,
             LF_Type = "TouchInterest",
-
-            -- Movement Extras
             Truss_Enabled = false,
             Airwalk_Enabled = false,
             Autorespawn_Enabled = false,
             Flight_Enabled = false,
             Flight_Speed = 50,
-
-            -- ✅ DESYNC (Seat + Weld estilo Gravel)
             Desync_Enabled = false,
             Desync_Transparency = 0.5,
-
-            -- Save/Load
             SaveFolder = "TownComplete_Saves",
             SaveExtension = ".json",
             CurrentSave = nil,
@@ -843,11 +808,27 @@ do
     end
     Vars.GetBonesForRig = GetBonesForRig
 
+    -- ============================================================
+    -- ✅ FIX v9.9.2: PredictPosition con pcall (AssemblyLinearAcceleration no existe en Solara)
+    -- ============================================================
     local function PredictPosition(part, amount, usePing)
         if not part then return nil end
         local pos = part.Position
-        local vel = part.AssemblyLinearVelocity or V3(0,0,0)
-        local acc = part.AssemblyLinearAcceleration or V3(0,0,0)
+
+        -- Velocity: puede existir, guardar con pcall
+        local vel = V3(0, 0, 0)
+        pcall(function()
+            vel = part.AssemblyLinearVelocity or part.Velocity or V3(0, 0, 0)
+        end)
+
+        -- Acceleration: NO existe en Solara — solo intentar, si falla = 0
+        local acc = V3(0, 0, 0)
+        pcall(function()
+            if part.AssemblyLinearAcceleration then
+                acc = part.AssemblyLinearAcceleration
+            end
+        end)
+
         local totalAmount = amount
         if usePing then
             local ping = 0
@@ -856,6 +837,8 @@ do
             end)
             totalAmount = totalAmount + ping * 0.5
         end
+
+        -- Solo predicción lineal (v*t). Sin aceleración si no existe.
         return pos + vel * totalAmount + 0.5 * acc * totalAmount * totalAmount
     end
     Vars.PredictPosition = PredictPosition
@@ -1064,7 +1047,6 @@ do
     local GetBonesForRig = Vars.GetBonesForRig
     local SilentPcall = Vars.SilentPcall
 
-    -- Color by health helper
     local function healthColor(hum)
         if not hum then return Settings.ESP.Colors.Visible end
         local maxH = hum.MaxHealth or 100
@@ -2608,7 +2590,7 @@ do
         return candidates
     end
 
-    -- ✅ FIX: sin Enum.HumanoidStateType.Dying
+    -- ✅ Sin Enum.HumanoidStateType.Dying
     function TargetManager:ValidateTarget(player)
         if not player or player == LP then return false end
         if IsDeadBlacklisted(player.Name) then return false end
@@ -3028,7 +3010,7 @@ do
     Vars.GetTargetIndicator = function() return targetIndicator end
 
     -- ============================================================
-    -- Hotkeys
+    -- Hotkeys (Helper)
     -- ============================================================
     Vars.aimKeyBeganConn = UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
@@ -3364,7 +3346,6 @@ do
         local hiddenPos = root.Position + V3(0, -5000, 0)
         Vars.desyncHiddenPos = hiddenPos
 
-        -- Crear seat oculto
         local seat = Instance.new("Seat")
         seat.Name = "TC_DesyncSeat_" .. tostring(math.random(10000, 99999))
         seat.Size = V3(2, 1, 2)
@@ -3378,7 +3359,6 @@ do
         seat.Parent = Vars.Workspace
         Vars.desyncSeat = seat
 
-        -- Soldar el root al seat
         local weld = Instance.new("WeldConstraint")
         weld.Name = "TC_DesyncWeld"
         weld.Part0 = root
@@ -3391,7 +3371,6 @@ do
             root.CFrame = CFrame_new(hiddenPos)
         end)
 
-        -- Transparencia visual
         local trans = Settings.Advanced.Desync_Transparency
         for _, part in ipairs(char:GetDescendants()) do
             if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
@@ -3402,7 +3381,6 @@ do
             end
         end
 
-        -- Loop para mantener el seat alejado
         Vars.desyncConnection = RunService.Heartbeat:Connect(function()
             if not Vars.desyncActive then return end
             if Vars.desyncSeat and Vars.desyncSeat.Parent and Vars.desyncHiddenPos then
@@ -4082,7 +4060,6 @@ do
     local function ApplyAntiKick(state)
         Settings.Advanced.AntiKick = state
         if state then
-            -- ⚠️ Solo hookfunction(LP.Kick) — NO hookmetamethod(game, "__namecall") porque crashea Solara
             if not Vars.antikickOriginal then Vars.antikickOriginal = {} end
             if not Vars.antikickOriginal.kick then
                 local oldKick = LP.Kick
@@ -4976,9 +4953,10 @@ do
     local Settings = Vars.Settings
     local UserInputService = Vars.UserInputService
     local table_insert = Vars.table_insert
+    local LP = Vars.LP
 
     local Window = ScryuxUI:CreateWindow({
-        Title = "Town Complete v9.9.1",
+        Title = "Town Complete v9.9.2",
         Size = UDim2.new(0, 800, 0, 680),
         Keybind = Settings.Hotkeys.ToggleMenu,
         Theme = "Dark",
@@ -5048,27 +5026,50 @@ do
         Callback = function(c) Settings.ESP.HeadDotColor = c end })
     ESPInfo:CreateSlider({ Text = "Head Dot Radius", Min = 1, Max = 15, Default = 5, Index = "ESP_HeadDotRadius",
         Callback = function(v) Settings.ESP.HeadDotRadius = v end })
-    ESPInfo:CreateToggle({ Text = "Items", Default = false, Index = "ESP_Items",
+
+    -- ✅ FIX v9.9.2: Toggle Items con límite + task.spawn + pcall
+    ESPInfo:CreateToggle({ Text = "Items (limitado a 100)", Default = false, Index = "ESP_Items",
         Callback = function(v)
             Settings.ESP.Items = v
             if v then
-                for _, part in ipairs(Vars.Workspace:GetDescendants()) do
-                    if Vars.IsItemPart(part) then Vars.CreateItemESP(part) end
-                end
+                task.spawn(function()
+                    task.wait(0.1)
+                    local count = 0
+                    local maxItems = Settings.ESP.ItemMaxCount or 100
+                    local ok, descendants = pcall(function()
+                        return Vars.Workspace:GetDescendants()
+                    end)
+                    if not ok or not descendants then return end
+                    for _, part in ipairs(descendants) do
+                        if count >= maxItems then break end
+                        if part:IsA("BasePart") and Vars.IsItemPart(part) then
+                            local success = pcall(Vars.CreateItemESP, part)
+                            if success then count = count + 1 end
+                        end
+                    end
+                    Logger.Info("Items ESP: " .. count .. " items encontrados")
+                end)
             else
                 Vars.ClearItemESP()
             end
         end })
+
     ESPInfo:CreateColorpicker({ Text = "Item Color", Default = Color3.fromRGB(255, 165, 0), Index = "ESP_ItemColor",
         Callback = function(c) Settings.ESP.ItemColor = c end })
     ESPInfo:CreateSlider({ Text = "Item Max Distance", Min = 50, Max = 2000, Default = 500, Index = "ESP_ItemMaxDist",
         Callback = function(v) Settings.ESP.ItemMaxDistance = v end })
+    ESPInfo:CreateSlider({ Text = "Item Max Count", Min = 10, Max = 500, Default = 100, Index = "ESP_ItemMaxCount",
+        Callback = function(v) Settings.ESP.ItemMaxCount = math.floor(v) end })
+
+    -- ✅ FIX v9.9.2: Toggle Weapons con pcall
     ESPInfo:CreateToggle({ Text = "Weapons", Default = false, Index = "ESP_Weapons",
         Callback = function(v)
             Settings.ESP.Weapons = v
             if not v then
                 for _, esp in pairs(Vars.ESPPool) do
-                    if esp.weapon then esp.weapon.Visible = false end
+                    pcall(function()
+                        if esp.weapon then esp.weapon.Visible = false end
+                    end)
                 end
             end
         end })
@@ -5880,7 +5881,7 @@ do
         if _env.TownUI_Window then
             pcall(function()
                 _env.TownUI_Window:Notify(
-                    "Town Complete v9.9.1",
+                    "Town Complete v9.9.2",
                     "RightShift = Menu | Y = Helper | End = Panic",
                     6, "Success"
                 )
