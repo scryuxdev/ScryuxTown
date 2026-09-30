@@ -1,7 +1,7 @@
 --!strict
 -- ============================================================
--- Town Complete v9.9.0 (Scryux UI) - Parte 1/3
--- Sync + Desync (Seat+Weld) + Gravel.cc integration
+-- Town Complete v9.9.1 (Scryux UI) - Parte 1/3
+-- FIX: AntiKick crash (removed global hookmetamethod)
 -- ============================================================
 
 local _env = getgenv and getgenv() or _G
@@ -54,7 +54,7 @@ do
         "https://raw.githubusercontent.com/player2dwhite-tech/Scryux-Library/main/Scryux-Library.lua",
     }
     local CACHE_FILE = "scryux_ui_cache.lua"
-    local CACHE_VERSION = "v9.9.0"
+    local CACHE_VERSION = "v9.9.1"
 
     local function SafeRequest(url)
         if Has("request") then
@@ -155,7 +155,6 @@ do
     local HttpService = game:GetService("HttpService")
     local MarketplaceService = game:GetService("MarketplaceService")
     local TweenService = game:GetService("TweenService")
-    local SoundService = game:GetService("SoundService")
 
     local LP = Players.LocalPlayer
     local Workspace = workspace
@@ -171,7 +170,6 @@ do
     Vars.HttpService = HttpService
     Vars.MarketplaceService = MarketplaceService
     Vars.TweenService = TweenService
-    Vars.SoundService = SoundService
     Vars.LP = LP
     Vars.Workspace = Workspace
     Vars.GetCamera = GetCamera
@@ -300,13 +298,11 @@ do
     Vars.lastESPUpdate = 0
     Vars.lastSkeletonUpdate = 0
 
-    -- HUD
     Vars.HudBackground = nil
     Vars.HudLabel = nil
     Vars.HudRightLabel = nil
     Vars.HudAccentLine = nil
 
-    -- Fun
     Vars.funConn = nil
     Vars.ragebotLastFire = 0
     Vars.ragebotTarget = nil
@@ -316,24 +312,18 @@ do
     Vars.blitzLastFire = 0
     Vars.blitzKilledPlayers = {}
 
-    -- ============================================
-    -- v9.9.0: Sync + Desync + Gravel.cc integration
-    -- ============================================
-    -- Sync Booster (existente)
-    Vars.syncData = nil  -- se inicializa en Bloque 8
+    Vars.syncData = nil
 
-    -- Desync (Seat + Weld - estilo Gravel)
+    -- Desync (Seat + Weld)
     Vars.desyncActive = false
     Vars.desyncSeat = nil
     Vars.desyncWeld = nil
     Vars.desyncConnection = nil
-    Vars.desyncCleanupConn = nil
     Vars.desyncSavedCFrame = nil
     Vars.desyncHiddenPos = nil
     Vars.desyncCharConn = nil
-    Vars.desyncLoop = nil
 
-    -- AntiKick
+    -- ✅ AntiKick (safe)
     Vars.antikickOriginal = nil
 
     -- Indicator
@@ -348,9 +338,6 @@ do
     -- Quick Toggles
     Vars.quickTogglesGui = nil
     Vars.qtConn = nil
-    Vars.qtDragging = false
-    Vars.qtDragStart = nil
-    Vars.qtStartPos = nil
 
     -- Hitbox Visualizer
     Vars.hitboxVisualizers = {}
@@ -495,7 +482,7 @@ do
             CrosshairTransparency = 1,
             CrosshairGap = 4,
         },
-        -- ✅ SYNC (existente, NO TOCAR)
+        -- ✅ SYNC (Booster de red)
         Sync = { Enabled = false, TryFFlagFallback = false, AutoDisableOnLowFPS = false },
         HUD = { Enabled = true, ShowFPS = true, ShowPing = true },
         Performance = { ESPUpdateRate = 0.03, SkeletonUpdateRate = 0.04 },
@@ -537,11 +524,11 @@ do
             BlitzTeleportRange = 5000,
         },
         -- ============================================
-        -- v9.9.0 ADVANCED
+        -- v9.9.1 ADVANCED (con FIX AntiKick)
         -- ============================================
         Advanced = {
-            -- AntiKick
-            AntiKick = true,
+            -- ✅ FIX: AntiKick DESACTIVADO por defecto (crash en Solara con __namecall)
+            AntiKick = false,
 
             -- Hitbox avanzado
             HitChance = 100,
@@ -586,7 +573,7 @@ do
             -- Loop Fire
             LF_Enabled = false,
             LF_Interval = 1,
-            LF_Type = "TouchInterest",  -- TouchInterest / ClickDetector / ProximityPrompt
+            LF_Type = "TouchInterest",
 
             -- Movement Extras
             Truss_Enabled = false,
@@ -595,7 +582,7 @@ do
             Flight_Enabled = false,
             Flight_Speed = 50,
 
-            -- ✅ DESYNC (Seat + Weld - estilo Gravel)
+            -- ✅ DESYNC (Seat + Weld estilo Gravel)
             Desync_Enabled = false,
             Desync_Transparency = 0.5,
 
@@ -1077,9 +1064,7 @@ do
     local GetBonesForRig = Vars.GetBonesForRig
     local SilentPcall = Vars.SilentPcall
 
-    -- ============================================================
     -- Color by health helper
-    -- ============================================================
     local function healthColor(hum)
         if not hum then return Settings.ESP.Colors.Visible end
         local maxH = hum.MaxHealth or 100
@@ -1273,7 +1258,6 @@ do
         local boxPos, boxSize, isVisible = GetBoundingVectors(char)
         local color = GetESPColor(player)
 
-        -- Chams
         if Settings.ESP.Chams then
             esp.chams.Adornee = char
             esp.chams.FillColor = color
@@ -1297,7 +1281,6 @@ do
             return
         end
 
-        -- Box
         esp.box.Visible = Settings.ESP.Box
         if Settings.ESP.Box then
             esp.box.Position = boxPos
@@ -1306,7 +1289,6 @@ do
             esp.box.Thickness = Settings.ESP.BoxThickness
         end
 
-        -- Health
         if Settings.ESP.ShowHealth then
             local hp = math_clamp(hum.Health / math_max(hum.MaxHealth, 1), 0, 1)
             esp.health.From = V2(boxPos.X - 5, boxPos.Y + boxSize.Y)
@@ -1318,7 +1300,6 @@ do
             esp.health.Visible = false
         end
 
-        -- Name
         if Settings.ESP.ShowName then
             local text = player.Name
             if Settings.ESP.ShowDistance and LP.Character then
@@ -1336,7 +1317,6 @@ do
             esp.name.Visible = false
         end
 
-        -- Head Dot
         if Settings.ESP.HeadDots and esp.headDot then
             local head = char:FindFirstChild("Head")
             if head then
@@ -1358,7 +1338,6 @@ do
             esp.headDot.Visible = false
         end
 
-        -- Weapon
         if Settings.ESP.Weapons and esp.weapon then
             local tool = char:FindFirstChildOfClass("Tool")
             if tool then
@@ -1591,7 +1570,6 @@ do
     Vars.RebuildActivePlayers = RebuildActivePlayers
     RebuildActivePlayers()
 
-    -- Loop unificado ESP + Skeleton
     Vars.espSkeletonConn = Vars.RunService.RenderStepped:Connect(function()
         if Vars.isScriptUnloaded then return end
 
@@ -1625,7 +1603,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 5: HUD estilo Adonis + Eventos + Lighting + Custom FOV + HideBody + Crosshair
+-- BLOQUE 5: HUD estilo Adonis + Eventos + Lighting + FOV + HideBody + Crosshair
 -- ============================================================
 do
     local Players = Vars.Players
@@ -1795,9 +1773,6 @@ do
         end
     end)
 
-    -- ============================================================
-    -- Player events
-    -- ============================================================
     Vars.playerAddedConn = Players.PlayerAdded:Connect(function(p)
         if p ~= LP then Vars.RebuildActivePlayers() end
     end)
@@ -1850,7 +1825,6 @@ do
 
     local function setFullBright(enabled)
         SaveOriginalLighting()
-
         if enabled then
             Lighting.Brightness = 2.5
             Lighting.FogEnd = 9e9
@@ -2534,9 +2508,6 @@ do
     end
     Vars.GetNearestBodyPart = GetNearestBodyPart
 
-    -- ============================================================
-    -- Target Manager
-    -- ============================================================
     local TargetManager = {}
     local currentTarget = nil
 
@@ -3057,7 +3028,7 @@ do
     Vars.GetTargetIndicator = function() return targetIndicator end
 
     -- ============================================================
-    -- Hotkeys (Helper)
+    -- Hotkeys
     -- ============================================================
     Vars.aimKeyBeganConn = UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
@@ -3236,7 +3207,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 8: Sync Booster + Anti-Fall + Strafe HvH + Exploit
+-- BLOQUE 8: Sync Booster + Desync + Anti-Fall + Strafe + Exploit
 -- ============================================================
 do
     local Players = Vars.Players
@@ -3380,14 +3351,20 @@ do
 
     -- ============================================================
     -- DESYNC (Seat + Weld - estilo Gravel)
-    -- Mueve tu personaje REAL a una posición oculta mientras
-    -- tu personaje VISUAL se queda donde lo dejaste.
     -- ============================================================
-    local function CreateDesyncSeat()
-        if Vars.desyncSeat and Vars.desyncSeat.Parent then
-            return Vars.desyncSeat
-        end
+    local function StartDesync()
+        if Vars.desyncActive then return end
+        if not LP.Character then return end
+        local char = LP.Character
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not hum or not root then return end
 
+        Vars.desyncSavedCFrame = root.CFrame
+        local hiddenPos = root.Position + V3(0, -5000, 0)
+        Vars.desyncHiddenPos = hiddenPos
+
+        -- Crear seat oculto
         local seat = Instance.new("Seat")
         seat.Name = "TC_DesyncSeat_" .. tostring(math.random(10000, 99999))
         seat.Size = V3(2, 1, 2)
@@ -3397,44 +3374,24 @@ do
         seat.Massless = true
         seat.CanQuery = false
         seat.CanTouch = false
-        seat.Parent = Vars.Workspace
-
-        Vars.desyncSeat = seat
-        return seat
-    end
-
-    local function StartDesync()
-        if Vars.desyncActive then return end
-        if not LP.Character then return end
-
-        local char = LP.Character
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        local root = char:FindFirstChild("HumanoidRootPart")
-        if not hum or not root then return end
-
-        -- Guardar CFrame original
-        Vars.desyncSavedCFrame = root.CFrame
-
-        -- Crear seat oculto en una posición alejada
-        local hiddenPos = root.Position + V3(0, -5000, 0)
-        Vars.desyncHiddenPos = hiddenPos
-
-        local seat = CreateDesyncSeat()
         seat.CFrame = CFrame_new(hiddenPos)
+        seat.Parent = Vars.Workspace
+        Vars.desyncSeat = seat
 
-        -- Sentar al humanoide en el seat (fuerza el CFrame real al seat)
+        -- Soldar el root al seat
+        local weld = Instance.new("WeldConstraint")
+        weld.Name = "TC_DesyncWeld"
+        weld.Part0 = root
+        weld.Part1 = seat
+        weld.Parent = root
+        Vars.desyncWeld = weld
+
         pcall(function()
-            local weld = Instance.new("WeldConstraint")
-            weld.Name = "TC_DesyncWeld"
-            weld.Part0 = root
-            weld.Part1 = seat
-            weld.Parent = root
-            Vars.desyncWeld = weld
             hum.Sit = true
             root.CFrame = CFrame_new(hiddenPos)
         end)
 
-        -- Aplicar transparencia al personaje visual
+        -- Transparencia visual
         local trans = Settings.Advanced.Desync_Transparency
         for _, part in ipairs(char:GetDescendants()) do
             if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
@@ -3445,21 +3402,16 @@ do
             end
         end
 
-        -- Loop para mantener el desync
+        -- Loop para mantener el seat alejado
         Vars.desyncConnection = RunService.Heartbeat:Connect(function()
             if not Vars.desyncActive then return end
-            if not LP.Character then return end
-            local r = LP.Character:FindFirstChild("HumanoidRootPart")
-            if not r then return end
-            -- Mantener el seat alejado del jugador visual
             if Vars.desyncSeat and Vars.desyncSeat.Parent and Vars.desyncHiddenPos then
                 Vars.desyncSeat.CFrame = CFrame_new(Vars.desyncHiddenPos)
             end
         end)
 
-        -- Cleanup al respawn
         Vars.desyncCharConn = LP.CharacterAdded:Connect(function()
-            StopDesync()
+            Vars.StopDesync()
         end)
 
         Vars.desyncActive = true
@@ -3487,7 +3439,6 @@ do
             Vars.desyncCharConn = nil
         end
 
-        -- Restaurar transparencia
         if LP.Character then
             for _, part in ipairs(LP.Character:GetDescendants()) do
                 if part:IsA("BasePart") then
@@ -3831,15 +3782,12 @@ end
 -- BLOQUE 8.5: FUN (Ragebot + Orbit + Ragebot Orbit + Blitz)
 -- ============================================================
 do
-    local Players = Vars.Players
     local RunService = Vars.RunService
-    local UserInputService = Vars.UserInputService
     local LP = Vars.LP
     local Settings = Vars.Settings
     local V2 = Vars.Vector2_new
     local V3 = Vars.Vector3_new
     local CFrame_new = Vars.CFrame_new
-    local math_clamp = Vars.math_clamp
     local math_rad = Vars.math_rad
     local math_tan = Vars.math_tan
     local table_insert = Vars.table_insert
@@ -3847,7 +3795,6 @@ do
 
     local GetCamera = Vars.GetCamera
     local IsPassive = Vars.IsPassive
-    local CheckVisibility = Vars.CheckVisibility
     local VirtualInputManager = Vars.VirtualInputManager
 
     local function TryFireWeapon()
@@ -3874,7 +3821,6 @@ do
         if not cam then return nil end
         local center = V2(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
         local best, bestScore = nil, math.huge
-
         for _, player in ipairs(Vars.activePlayers) do
             if not player or player == LP then continue end
             if Vars.IsWhitelisted and Vars.IsWhitelisted(player) then continue end
@@ -4111,7 +4057,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 8.7: ADVANCED (Gravel.cc integration)
+-- BLOQUE 8.7: ADVANCED (con AntiKick SEGURO)
 -- ============================================================
 do
     local RunService = Vars.RunService
@@ -4131,60 +4077,47 @@ do
     local GetCamera = Vars.GetCamera
 
     -- ============================================================
-    -- 1. AntiKick
+    -- 1. AntiKick (VERSIÓN SEGURA - sin hookmetamethod global)
     -- ============================================================
     local function ApplyAntiKick(state)
         Settings.Advanced.AntiKick = state
         if state then
-            if not hookmetamethod or not hookfunction then
-                Logger.Warn("AntiKick: executor sin hooks")
-                Settings.Advanced.AntiKick = false
-                return
-            end
+            -- ⚠️ Solo hookfunction(LP.Kick) — NO hookmetamethod(game, "__namecall") porque crashea Solara
             if not Vars.antikickOriginal then Vars.antikickOriginal = {} end
-            if not Vars.antikickOriginal.namecall then
-                local oldNamecall
-                oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(...)
-                    local method = getnamecallmethod and getnamecallmethod() or ""
-                    if select(1, ...) == LP and (method == "Kick" or method == "kick") then
-                        return nil
-                    end
-                    return oldNamecall(...)
-                end))
-                Vars.antikickOriginal.namecall = oldNamecall
-            end
             if not Vars.antikickOriginal.kick then
-                local ok, result = pcall(function()
-                    return hookfunction(LP.Kick, newcclosure(function(self, _)
-                        if self ~= LP then
-                            error("Expected ':' not '.' calling member function Kick", 2)
-                        end
-                        return nil
-                    end))
-                end)
-                if ok then Vars.antikickOriginal.kick = result end
+                local oldKick = LP.Kick
+                if oldKick and type(hookfunction) == "function" and type(newcclosure) == "function" then
+                    local ok, result = pcall(function()
+                        return hookfunction(oldKick, newcclosure(function(self, ...)
+                            if self == LP then
+                                return nil
+                            end
+                            return oldKick(self, ...)
+                        end))
+                    end)
+                    if ok and result then
+                        Vars.antikickOriginal.kick = result
+                        Logger.Info("AntiKick ACTIVADO (safe mode)")
+                    else
+                        Logger.Warn("AntiKick: hookfunction falló")
+                        Settings.Advanced.AntiKick = false
+                    end
+                else
+                    Logger.Warn("AntiKick: executor sin hookfunction/newcclosure")
+                    Settings.Advanced.AntiKick = false
+                end
             end
-            Logger.Info("AntiKick ACTIVADO")
         else
-            if Vars.antikickOriginal then
-                if Vars.antikickOriginal.namecall then
-                    pcall(function() hookmetamethod(game, "__namecall", Vars.antikickOriginal.namecall) end)
-                    Vars.antikickOriginal.namecall = nil
-                end
-                if Vars.antikickOriginal.kick then
-                    pcall(function() hookfunction(LP.Kick, Vars.antikickOriginal.kick) end)
-                    Vars.antikickOriginal.kick = nil
-                end
+            if Vars.antikickOriginal and Vars.antikickOriginal.kick then
+                pcall(function()
+                    hookfunction(LP.Kick, Vars.antikickOriginal.kick)
+                end)
+                Vars.antikickOriginal.kick = nil
             end
             Logger.Info("AntiKick DESACTIVADO")
         end
     end
     Vars.ApplyAntiKick = ApplyAntiKick
-
-    task.spawn(function()
-        task.wait(2)
-        if Settings.Advanced.AntiKick then pcall(ApplyAntiKick, true) end
-    end)
 
     -- ============================================================
     -- 2. Hitbox Advanced Helpers
@@ -4303,8 +4236,8 @@ do
 
         local frame = Instance.new("Frame")
         frame.Name = "Indicator"
-        frame.Size = UDim2.new(0, 300, 0, 30)
-        frame.Position = UDim2.new(0.5, -150, 0, 80)
+        frame.Size = UDim2.new(0, 320, 0, 30)
+        frame.Position = UDim2.new(0.5, -160, 0, 80)
         frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
         frame.BackgroundTransparency = 0.35
         frame.BorderSizePixel = 0
@@ -4915,7 +4848,6 @@ do
         {name = "Ragebot",   get = function() return Settings.Fun.RagebotEnabled end,    set = function(v) Settings.Fun.RagebotEnabled = v end},
         {name = "Orbit",     get = function() return Settings.Fun.OrbitEnabled end,      set = function(v) Settings.Fun.OrbitEnabled = v end},
         {name = "Blitz",     get = function() return Settings.Fun.BlitzEnabled end,      set = function(v) Settings.Fun.BlitzEnabled = v end},
-        {name = "AntiKick",  get = function() return Settings.Advanced.AntiKick end,     set = function(v) Vars.ApplyAntiKick(v) end},
         {name = "Sync",      get = function() return Settings.Sync.Enabled end,          set = function(v)
             Settings.Sync.Enabled = v
             if v then Vars.StartSyncBooster() else Vars.StopSyncBooster() end
@@ -5046,7 +4978,7 @@ do
     local table_insert = Vars.table_insert
 
     local Window = ScryuxUI:CreateWindow({
-        Title = "Town Complete v9.9.0",
+        Title = "Town Complete v9.9.1",
         Size = UDim2.new(0, 800, 0, 680),
         Keybind = Settings.Hotkeys.ToggleMenu,
         Theme = "Dark",
@@ -5424,7 +5356,7 @@ do
         Callback = function(v) Settings.Fun.RagebotAimPart = v end })
     RageSet:CreateToggle({ Text = "Team Check", Default = true, Index = "Fun_RageTeamCheck",
         Callback = function(v) Settings.Fun.RagebotTeamCheck = v end })
-    RageSet:CreateToggle({ Text = "Silent Aim (no rota cámara)", Default = true, Index = "Fun_RageSilent",
+    RageSet:CreateToggle({ Text = "Silent Aim", Default = true, Index = "Fun_RageSilent",
         Callback = function(v) Settings.Fun.RagebotSilentAim = v end })
 
     local OrbitSet = FunTab:CreateSection("Orbit")
@@ -5434,7 +5366,7 @@ do
             Vars.orbitAngle = 0
             if Window.Notify then Window:Notify("Fun", "Orbit: " .. tostring(v), 1.5, "Info") end
         end })
-    OrbitSet:CreateSlider({ Text = "Orbit Speed (rad/s)", Min = 0.5, Max = 15, Default = 3, Index = "Fun_OrbitSpeed",
+    OrbitSet:CreateSlider({ Text = "Orbit Speed", Min = 0.5, Max = 15, Default = 3, Index = "Fun_OrbitSpeed",
         Callback = function(v) Settings.Fun.OrbitSpeed = v end })
     OrbitSet:CreateSlider({ Text = "Orbit Radius", Min = 2, Max = 30, Default = 8, Index = "Fun_OrbitRadius",
         Callback = function(v) Settings.Fun.OrbitRadius = v end })
@@ -5468,13 +5400,13 @@ do
         Callback = function(v) Settings.Fun.BlitzTeleportRange = v end })
 
     -- ============================================================
-    -- Advanced Tab (Gravel.cc integration)
+    -- Advanced Tab
     -- ============================================================
     local AdvancedTab = Window:CreateTab("Advanced")
 
     -- AntiKick
     local AntiKickSet = AdvancedTab:CreateSection("AntiKick")
-    AntiKickSet:CreateToggle({ Text = "AntiKick (block kicks)", Default = true, Index = "Adv_AntiKick",
+    AntiKickSet:CreateToggle({ Text = "AntiKick (block kicks)", Default = false, Index = "Adv_AntiKick",
         Callback = function(v) Vars.ApplyAntiKick(v) end })
 
     -- Hitbox Advanced
@@ -5570,7 +5502,7 @@ do
     MoveSet:CreateSlider({ Text = "Flight Speed", Min = 10, Max = 300, Default = 50, Index = "Adv_FlightSpeed",
         Callback = function(v) Settings.Advanced.Flight_Speed = v end })
 
-    -- Sync + Desync (ambos separados)
+    -- Sync / Desync
     local SyncSet = AdvancedTab:CreateSection("Sync / Desync")
     SyncSet:CreateToggle({ Text = "Sync Booster (network)", Default = false, Index = "Sync_Enabled",
         Callback = function(v)
@@ -5948,7 +5880,7 @@ do
         if _env.TownUI_Window then
             pcall(function()
                 _env.TownUI_Window:Notify(
-                    "Town Complete v9.9.0",
+                    "Town Complete v9.9.1",
                     "RightShift = Menu | Y = Helper | End = Panic",
                     6, "Success"
                 )
