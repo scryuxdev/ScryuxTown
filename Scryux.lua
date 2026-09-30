@@ -1,7 +1,8 @@
 --!strict
 -- ============================================================
--- Town Complete v9.9.4 (Scryux UI) - Parte 1/3
+-- Town Complete v9.9.5 (Scryux UI) - Parte 1/3
 -- FPS Booster + Smart Nearest + Sin Fun (Ragebot/Orbit/Blitz)
+-- + Fling (v9.9.5) con techo 1e24
 -- ============================================================
 
 local _env = getgenv and getgenv() or _G
@@ -55,7 +56,7 @@ do
         "https://github.com/scryuxdev/Scryux-Library/raw/main/Scryux-Library.lua?t=" .. tostring(os.time()),
     }
     local CACHE_FILE = "scryux_ui_cache.lua"
-    local CACHE_VERSION = "v9.9.4"
+    local CACHE_VERSION = "v9.9.5"
 
     local function SafeRequest(url)
         if Has("request") then
@@ -288,6 +289,12 @@ do
     Vars.exploitFlyKeyEndConn = nil
     Vars.exploitTeleportConn = nil
 
+    -- ✅ Fling vars (v9.9.5)
+    Vars.flingConn = nil
+    Vars.flingLastTime = 0
+    Vars.flingActive = false
+    Vars.flingTarget = nil
+
     Vars.positionHistory = {}
     Vars.POS_HISTORY_MAX = 20
     Vars.POS_HISTORY_TTL = 0.2
@@ -307,7 +314,6 @@ do
     Vars.HudRightLabel = nil
     Vars.HudAccentLine = nil
 
-    -- ✅ FPS Booster (NUEVO)
     Vars.fpsBoosterActive = false
     Vars.fpsBoosterOriginalMaterials = {}
     Vars.fpsBoosterOriginalLighting = nil
@@ -501,11 +507,18 @@ do
             StrafeKeyLeft = Enum.KeyCode.A, StrafeKeyRight = Enum.KeyCode.D,
         },
         Exploit = {
-            Spinbot = false, SpinbotSpeed = 720,
+            Spinbot = false, SpinbotSpeed = 1000,
             Walkspeed = false, WalkspeedValue = 16,
             JumpPower = false, JumpPowerValue = 50,
             Noclip = false, Fly = false, FlySpeed = 50,
             TeleportToCursor = false,
+            -- ✅ Fling (v9.9.5)
+            FlingEnabled = false,
+            FlingOnlyNearest = true,
+            FlingVelocity = 1e24,
+            FlingCooldown = 0.5,
+            FlingLoop = true,
+            FlingTransparency = false,
         },
         Hotkeys = {
             ToggleMenu = Enum.KeyCode.RightShift,
@@ -549,7 +562,6 @@ do
             Flight_Speed = 50,
             Desync_Enabled = false,
             Desync_Transparency = 0.5,
-            -- ✅ FPS Booster settings
             FPSBooster_Enabled = false,
             FPSBooster_QualityLevel = "Level01",
             FPSBooster_LOD = "Low",
@@ -816,7 +828,6 @@ do
     end
     Vars.GetBonesForRig = GetBonesForRig
 
-    -- ✅ FIX: PredictPosition con pcall (AssemblyLinearAcceleration no existe en Solara)
     local function PredictPosition(part, amount, usePing)
         if not part then return nil end
         local pos = part.Position
@@ -846,9 +857,6 @@ do
     end
     Vars.PredictPosition = PredictPosition
 
-    -- ============================================================
-    -- GetSmartNearestVisiblePart
-    -- ============================================================
     local SMART_PARTS_R15 = {
         "Head", "UpperTorso", "LowerTorso",
         "LeftUpperArm", "RightUpperArm",
@@ -942,7 +950,6 @@ do
     Vars.GetSmartNearestVisiblePart = GetSmartNearestVisiblePart
     Vars.IsPartVisibleFrom = IsPartVisibleFrom
 
-    -- Selective FOV (legacy)
     local function GetSelectiveBodyPart(player, screenPos, fovCenter, fovRadius)
         if not player or not player.Character then return nil end
         local char = player.Character
@@ -1142,9 +1149,6 @@ do
     end
     Vars.healthColor = healthColor
 
-    -- ============================================================
-    -- Skeleton line pool
-    -- ============================================================
     local function AcquireSkeletonLine()
         local line = table_remove(Vars.SkeletonLinePool)
         if line then line.Visible = false; return line end
@@ -1182,9 +1186,6 @@ do
     end
     Vars.ClearAllSkeletons = ClearAllSkeletons
 
-    -- ============================================================
-    -- ESP Pool
-    -- ============================================================
     local function GetOrCreateESP(name)
         local esp = Vars.ESPPool[name]
         if esp then return esp end
@@ -1503,9 +1504,6 @@ do
     end
     Vars.UpdateSkeletonForPlayer = UpdateSkeletonForPlayer
 
-    -- ============================================================
-    -- Items ESP
-    -- ============================================================
     local ItemESPList = Vars.ItemESPList or {}
     Vars.ItemESPList = ItemESPList
 
@@ -1783,6 +1781,7 @@ do
         if Settings.Advanced.Desync_Enabled then table_insert(leftParts, "DESYNC") end
         if Settings.Advanced.FPSBooster_Enabled then table_insert(leftParts, "FPSBOOST") end
         if Settings.Advanced.AntiKick then table_insert(leftParts, "ANTIKICK") end
+        if Settings.Exploit.FlingEnabled then table_insert(leftParts, "FLING") end
 
         local leftText = table_concat(leftParts, "  |  ")
 
@@ -1869,9 +1868,6 @@ do
         end
     end
 
-    -- ============================================================
-    -- Lighting
-    -- ============================================================
     local function SaveOriginalLighting()
         if Vars.OriginalLighting then return end
         Vars.OriginalLighting = {
@@ -1984,9 +1980,6 @@ do
         end
     end)
 
-    -- ============================================================
-    -- HideBody
-    -- ============================================================
     local HIDE_BODY_PARTS = {
         "UpperTorso", "LowerTorso", "Torso",
         "LeftUpperArm", "LeftLowerArm", "RightUpperArm", "RightLowerArm",
@@ -2044,9 +2037,6 @@ do
     end
     Vars.StopHideBody = StopHideBody
 
-    -- ============================================================
-    -- Crosshair
-    -- ============================================================
     local function CreateCrosshairLines()
         for _, line in ipairs(Vars.CrosshairLines) do
             pcall(function() line:Remove() end)
@@ -2253,7 +2243,6 @@ do
 
     StartTracerLoop()
 
-    -- No Recoil
     local noRecoilCache = {}
 
     local function RebuildNoRecoilCache()
@@ -2393,7 +2382,6 @@ do
     end
     Vars.StopNoRecoil = StopNoRecoil
 
-    -- X-Ray
     local function StartXRay()
         if Vars.xrayThread then return end
         Vars.xrayActive = true
@@ -2797,7 +2785,6 @@ do
 
     Vars.TargetManager = TargetManager
 
-    -- Anti-360
     local function CheckAnti360()
         if not Settings.Aimbot.Anti360.Enabled then
             Vars.anti360Active = false
@@ -3102,9 +3089,6 @@ do
         if input.KeyCode == Settings.Aimbot.AimKey then Vars.aimKeyHeld = false end
     end)
 
-    -- ============================================================
-    -- AIM ASSIST v9.9.4 (Legit + Smart Nearest)
-    -- ============================================================
     local aimAssistEngaged = false
 
     local function GetAimAssistTarget()
@@ -3290,7 +3274,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 8: Sync + Desync + Anti-Fall + Strafe + Exploits
+-- BLOQUE 8: Sync + Desync + Anti-Fall + Strafe + Exploits + FLING
 -- ============================================================
 do
     local Players = Vars.Players
@@ -3432,9 +3416,6 @@ do
         end
     end)
 
-    -- ============================================================
-    -- DESYNC
-    -- ============================================================
     local function StartDesync()
         if Vars.desyncActive then return end
         if not LP.Character then return end
@@ -3546,9 +3527,6 @@ do
     Vars.StartDesync = StartDesync
     Vars.StopDesync = StopDesync
 
-    -- ============================================================
-    -- Anti-Fall
-    -- ============================================================
     local function StartAntiFall()
         if Vars.antiFallRunning then return end
         Vars.antiFallRunning = true
@@ -3606,9 +3584,6 @@ do
     end
     Vars.StopAntiFall = StopAntiFall
 
-    -- ============================================================
-    -- Strafe HvH
-    -- ============================================================
     local strafeLeftConn = nil
     local strafeLeftEndConn = nil
     local lastPeek = 0
@@ -3661,7 +3636,7 @@ do
     end
 
     -- ============================================================
-    -- Spinbot
+    -- Spinbot (default 1000)
     -- ============================================================
     local lastSpin = 0
     local spinAngle = 0
@@ -3855,6 +3830,129 @@ do
             Vars.exploitTeleportConn = nil
         end
     end
+
+    -- ============================================================
+    -- ✅ FLING (v9.9.5) - techo 1e24 - NUNCA al local player
+    -- ============================================================
+    local function FlingTarget(targetPlayer)
+        if not targetPlayer then return false end
+        if targetPlayer == LP then return false end   -- 🚫 NUNCA a ti mismo
+        if not targetPlayer.Character then return false end
+
+        local char = targetPlayer.Character
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not root or not hum then return false end
+
+        -- ✅ Clamp duro a 1e24 (nunca más)
+        local raw = Settings.Exploit.FlingVelocity or 1e24
+        local mag = raw
+        if mag > 1e24 then mag = 1e24 end
+        if mag < 1e5 then mag = 1e5 end
+
+        local vel = V3(mag, mag, mag)
+
+        -- 1. Intentar tomar control de red del target
+        pcall(function()
+            if root.SetNetworkOwner then
+                root:SetNetworkOwner(LP)
+            end
+        end)
+
+        -- 2. Aplicar velocidad extrema (varias propiedades por compatibilidad)
+        pcall(function()
+            root.AssemblyLinearVelocity = vel
+            root.AssemblyAngularVelocity = vel
+        end)
+        pcall(function()
+            root.Velocity = vel
+            root.RotVelocity = vel
+        end)
+
+        -- 3. Poner el Humanoid en estado Physics (rompe animaciones)
+        pcall(function()
+            hum:ChangeState(Enum.HumanoidStateType.Physics)
+        end)
+
+        -- 4. Opcional: hacer transparente
+        if Settings.Exploit.FlingTransparency then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    pcall(function()
+                        part.Transparency = 1
+                    end)
+                end
+            end
+        end
+
+        return true
+    end
+
+    local function FlingAll()
+        for _, p in ipairs(Vars.activePlayers) do
+            if p ~= LP and p.Character then
+                pcall(FlingTarget, p)
+            end
+        end
+    end
+
+    local function FlingLoopTick()
+        if Vars.isScriptUnloaded or not Settings.Exploit.FlingEnabled then return end
+
+        local now = os_clock()
+        if (now - Vars.flingLastTime) < Settings.Exploit.FlingCooldown then return end
+        Vars.flingLastTime = now
+
+        if Settings.Exploit.FlingOnlyNearest then
+            local t = Vars.TargetManager and Vars.TargetManager:GetCurrentTarget()
+            if t and t.player and t.player ~= LP and t.player.Character then
+                pcall(FlingTarget, t.player)
+            end
+        else
+            pcall(FlingAll)
+        end
+    end
+
+    Vars.StartFling = function()
+        if Vars.flingActive then return end
+        Vars.flingActive = true
+        Settings.Exploit.FlingEnabled = true
+        Vars.flingLastTime = 0
+
+        Vars.flingConn = RunService.Heartbeat:Connect(function()
+            if Vars.isScriptUnloaded or not Vars.flingActive then return end
+            if not Settings.Exploit.FlingLoop then return end
+            pcall(FlingLoopTick)
+        end)
+
+        Logger.Info("Fling ACTIVADO (techo 1e24, solo a otros)")
+    end
+
+    Vars.StopFling = function()
+        if not Vars.flingActive then
+            Settings.Exploit.FlingEnabled = false
+            return
+        end
+        Vars.flingActive = false
+        Settings.Exploit.FlingEnabled = false
+        if Vars.flingConn then
+            pcall(function() Vars.flingConn:Disconnect() end)
+            Vars.flingConn = nil
+        end
+        Logger.Info("Fling DESACTIVADO")
+    end
+
+    -- Fling manual (una sola vez, sin loop)
+    Vars.FlingOnce = function()
+        if Settings.Exploit.FlingOnlyNearest then
+            local t = Vars.TargetManager and Vars.TargetManager:GetCurrentTarget()
+            if t and t.player and t.player ~= LP then
+                pcall(FlingTarget, t.player)
+            end
+        else
+            pcall(FlingAll)
+        end
+    end
 end
 
 -- ============================================================
@@ -3878,9 +3976,6 @@ do
 
     local GetCamera = Vars.GetCamera
 
-    -- ============================================================
-    -- Helper: Safe GUI parent
-    -- ============================================================
     local function GetSafeGuiParent()
         if type(gethui) == "function" then
             local ok, hui = pcall(gethui)
@@ -3939,7 +4034,7 @@ do
     Vars.ApplyAntiKick = ApplyAntiKick
 
     -- ============================================================
-    -- 2. FPS Booster (NUEVO v9.9.4)
+    -- 2. FPS Booster
     -- ============================================================
     local function ApplyFPSBooster(state)
         Settings.Advanced.FPSBooster_Enabled = state
@@ -3957,13 +4052,11 @@ do
             }
             Vars.fpsBoosterRemovedEffects = {}
 
-            -- Quality Level
             pcall(function()
                 local q = Enum.QualityLevel[Settings.Advanced.FPSBooster_QualityLevel] or Enum.QualityLevel.Level01
                 settings().Rendering.QualityLevel = q
             end)
 
-            -- LOD
             pcall(function()
                 local lod = Settings.Advanced.FPSBooster_LOD
                 if lod == "Low" then
@@ -3973,12 +4066,10 @@ do
                 end
             end)
 
-            -- Sombras
             if Settings.Advanced.FPSBooster_Shadows == false then
                 pcall(function() Lighting.GlobalShadows = false end)
             end
 
-            -- Streaming radius
             if Settings.Advanced.FPSBooster_StreamingRadius then
                 task.spawn(function()
                     while Vars.fpsBoosterActive do
@@ -3991,7 +4082,6 @@ do
                 end)
             end
 
-            -- Materiales + efectos
             task.spawn(function()
                 task.wait(0.1)
                 local targetMatName = Settings.Advanced.FPSBooster_MaterialTarget or "Plastic"
@@ -4048,7 +4138,6 @@ do
             if not Vars.fpsBoosterActive then return end
             Vars.fpsBoosterActive = false
 
-            -- Restaurar materiales
             for part, mat in pairs(Vars.fpsBoosterOriginalMaterials) do
                 if part and part.Parent then
                     pcall(function() part.Material = mat end)
@@ -4056,7 +4145,6 @@ do
             end
             Vars.fpsBoosterOriginalMaterials = {}
 
-            -- Restaurar efectos
             for _, data in ipairs(Vars.fpsBoosterRemovedEffects) do
                 if data.instance and data.parent then
                     pcall(function()
@@ -4066,7 +4154,6 @@ do
             end
             Vars.fpsBoosterRemovedEffects = {}
 
-            -- Restaurar Lighting
             if Vars.fpsBoosterOriginalLighting then
                 local orig = Vars.fpsBoosterOriginalLighting
                 pcall(function()
@@ -4078,7 +4165,6 @@ do
                 Vars.fpsBoosterOriginalLighting = nil
             end
 
-            -- Restaurar quality / LOD
             pcall(function()
                 settings().Rendering.QualityLevel = Enum.QualityLevel.Default
             end)
@@ -4195,7 +4281,7 @@ do
     Vars.ClearAllHitboxViz = ClearAllHitboxViz
 
     -- ============================================================
-    -- 5. Indicator UI (FIX SEGURO)
+    -- 5. Indicator UI
     -- ============================================================
     local function CreateIndicator()
         if Vars.indicatorGui and Vars.indicatorGui.Parent then return Vars.indicatorGui end
@@ -4309,6 +4395,7 @@ do
         if Settings.Sync.Enabled then table_insert(features, "SYNC") end
         if Settings.Advanced.Desync_Enabled then table_insert(features, "DESYNC") end
         if Settings.Advanced.FPSBooster_Enabled then table_insert(features, "FPS") end
+        if Settings.Exploit.FlingEnabled then table_insert(features, "FLING") end
         local text = "TARGET: " .. (target or "None") .. "  |  " .. (#features > 0 and table.concat(features, "+") or "---")
         Vars.indicatorLabel.Text = text
         Vars.indicatorLabel.TextColor3 = target and Color3.fromRGB(255, 220, 0) or Color3.fromRGB(240, 240, 240)
@@ -4619,7 +4706,6 @@ do
         Vars.flightBodyGyro.CFrame = cam.CFrame
     end)
 
-    -- Cleanup Advanced
     Vars.CleanupAdvanced = function()
         pcall(function() if Vars.indicatorGui then Vars.indicatorGui:Destroy() end end)
         pcall(function() if Vars.quickTogglesGui then Vars.quickTogglesGui:Destroy() end end)
@@ -4823,7 +4909,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 8.9: QUICK TOGGLES (sin Ragebot/Orbit/Blitz)
+-- BLOQUE 8.9: QUICK TOGGLES (incluye Fling)
 -- ============================================================
 do
     local UserInputService = Vars.UserInputService
@@ -4845,6 +4931,9 @@ do
         end},
         {name = "FPSBoost",  get = function() return Settings.Advanced.FPSBooster_Enabled end, set = function(v) Vars.ApplyFPSBooster(v) end},
         {name = "Flight",    get = function() return Settings.Advanced.Flight_Enabled end, set = function(v) Vars.ApplyFlight(v) end},
+        {name = "Fling",     get = function() return Settings.Exploit.FlingEnabled end,  set = function(v)
+            if v then Vars.StartFling() else Vars.StopFling() end
+        end},
     }
 
     local function CreateQuickToggles()
@@ -4864,7 +4953,7 @@ do
 
             local main = Instance.new("Frame")
             main.Size = UDim2.new(0, 100, 0, #QuickTogglesList * 26 + 10)
-            main.Position = UDim2.new(0, 10, 0.5, -140)
+            main.Position = UDim2.new(0, 10, 0.5, -160)
             main.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
             main.BackgroundTransparency = 0.4
             main.BorderSizePixel = 0
@@ -4969,7 +5058,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 9: UI (Scryux) - SIN tab Fun
+-- BLOQUE 9: UI (Scryux)
 -- ============================================================
 do
     local Settings = Vars.Settings
@@ -4978,7 +5067,7 @@ do
     local LP = Vars.LP
 
     local Window = ScryuxUI:CreateWindow({
-        Title = "Town Complete v9.9.4",
+        Title = "Town Complete v9.9.5",
         Size = UDim2.new(0, 800, 0, 680),
         Keybind = Settings.Hotkeys.ToggleMenu,
         Theme = "Dark",
@@ -5380,7 +5469,7 @@ do
         Callback = function(v) Settings.Visuals.CrosshairGap = v end })
 
     -- ============================================================
-    -- Advanced Tab (con FPS Booster)
+    -- Advanced Tab
     -- ============================================================
     local AdvancedTab = Window:CreateTab("Advanced")
 
@@ -5474,12 +5563,8 @@ do
     MoveSet:CreateSlider({ Text = "Flight Speed", Min = 10, Max = 300, Default = 50, Index = "Adv_FlightSpeed",
         Callback = function(v) Settings.Advanced.Flight_Speed = v end })
 
-    -- ============================================================
-    -- Sync / Desync / FPS Booster (FPS Booster ARRIBA de Sync)
-    -- ============================================================
     local SyncSet = AdvancedTab:CreateSection("Sync / Desync / FPS")
 
-    -- FPS Booster ARRIBA de Sync
     SyncSet:CreateToggle({ Text = "FPS Booster (materials + quality + shadows)", Default = false, Index = "Adv_FPSBooster",
         Callback = function(v) Vars.ApplyFPSBooster(v) end })
     SyncSet:CreateDropdown({ Text = "Quality Level", Options = {"Level01","Level02","Level03","Level04","Level05","Level06","Level07","Level08","Level09","Level10"}, Default = "Level01", Index = "Adv_FPSQuality",
@@ -5497,7 +5582,6 @@ do
     SyncSet:CreateToggle({ Text = "Streaming Radius Boost", Default = true, Index = "Adv_FPSStreaming",
         Callback = function(v) Settings.Advanced.FPSBooster_StreamingRadius = v end })
 
-    -- Sync
     SyncSet:CreateToggle({ Text = "Sync Booster (network)", Default = false, Index = "Sync_Enabled",
         Callback = function(v)
             Settings.Sync.Enabled = v
@@ -5508,7 +5592,6 @@ do
     SyncSet:CreateToggle({ Text = "Sync: Try FFlag fallback", Default = false, Index = "Sync_FFlagFallback",
         Callback = function(v) Settings.Sync.TryFFlagFallback = v end })
 
-    -- Desync
     SyncSet:CreateToggle({ Text = "Desync (Seat + Weld)", Default = false, Index = "Adv_Desync",
         Callback = function(v)
             Settings.Advanced.Desync_Enabled = v
@@ -5557,7 +5640,7 @@ do
         Callback = function(v) Settings.Movement.PeekCooldown = v end })
 
     -- ============================================================
-    -- Exploit Tab
+    -- Exploit Tab (con Fling v9.9.5)
     -- ============================================================
     local ExploitTab = Window:CreateTab("Exploit")
     local ExpSet = ExploitTab:CreateSection("Movement")
@@ -5566,7 +5649,7 @@ do
             Settings.Exploit.Spinbot = v
             if v then Vars.StartExploitSpinbot() else Vars.StopExploitSpinbot() end
         end })
-    ExpSet:CreateSlider({ Text = "Spin Speed", Min = 60, Max = 2880, Default = 720, Index = "Exp_SpinSpeed",
+    ExpSet:CreateSlider({ Text = "Spin Speed", Min = 60, Max = 2880, Default = 1000, Index = "Exp_SpinSpeed",
         Callback = function(v) Settings.Exploit.SpinbotSpeed = v end })
     ExpSet:CreateToggle({ Text = "Walkspeed", Default = false, Index = "Exp_Walkspeed",
         Callback = function(v)
@@ -5599,6 +5682,33 @@ do
             Settings.Exploit.TeleportToCursor = v
             if v then Vars.StartExploitTeleport() else Vars.StopExploitTeleport() end
         end })
+
+    -- ✅ FLING UI (v9.9.5) - NUNCA al local player
+    local FlingSet = ExploitTab:CreateSection("🔥 Fling (v9.9.5)")
+    FlingSet:CreateLabel("Lanza a OTROS jugadores. Nunca te afecta a ti. Techo: 1e24.")
+    FlingSet:CreateToggle({ Text = "🔥 Fling (lanza jugadores)", Default = false, Index = "Exp_Fling",
+        Callback = function(v)
+            if v then Vars.StartFling() else Vars.StopFling() end
+        end })
+    FlingSet:CreateToggle({ Text = "Only Nearest (target actual)", Default = true, Index = "Exp_FlingNearest",
+        Callback = function(v) Settings.Exploit.FlingOnlyNearest = v end })
+    FlingSet:CreateToggle({ Text = "Loop continuo", Default = true, Index = "Exp_FlingLoop",
+        Callback = function(v) Settings.Exploit.FlingLoop = v end })
+    FlingSet:CreateSlider({ Text = "Cooldown (s)", Min = 0.1, Max = 3, Default = 0.5, Index = "Exp_FlingCooldown",
+        Callback = function(v) Settings.Exploit.FlingCooldown = v end })
+    FlingSet:CreateSlider({ Text = "Velocidad (1eX) [5..24]", Min = 5, Max = 24, Default = 24, Index = "Exp_FlingVelocity",
+        Callback = function(v)
+            local exp = math.floor(v)
+            local mag = 10 ^ exp
+            if mag > 1e24 then mag = 1e24 end
+            Settings.Exploit.FlingVelocity = mag
+        end })
+    FlingSet:CreateToggle({ Text = "Transparencia target", Default = false, Index = "Exp_FlingTransparency",
+        Callback = function(v) Settings.Exploit.FlingTransparency = v end })
+    FlingSet:CreateButton("⚡ Fling Once (una vez)", function()
+        if Vars.FlingOnce then pcall(Vars.FlingOnce) end
+    end)
+    FlingSet:CreateLabel("⚠️ 1e24 = crash del target. 1e10-1e15 = fling suave.")
 
     -- ============================================================
     -- Hotkeys Tab
@@ -5678,7 +5788,7 @@ do
     end)
 
     -- ============================================================
-    -- PANIC (End)
+    -- PANIC (End) - incluye Fling
     -- ============================================================
     Vars.panicConn = UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
@@ -5707,6 +5817,7 @@ do
             Settings.Exploit.Noclip = false
             Settings.Exploit.Fly = false
             Settings.Exploit.TeleportToCursor = false
+            Settings.Exploit.FlingEnabled = false
             Settings.Aimbot.StickyLock = false
             Settings.Backtrack.Enabled = false
             Settings.Advanced.Desync_Enabled = false
@@ -5738,6 +5849,7 @@ do
             Vars.StopExploitNoclip()
             Vars.StopExploitFly()
             Vars.StopExploitTeleport()
+            if Vars.StopFling then pcall(Vars.StopFling) end
             Vars.StopHideBody()
             Vars.StopAimAssist()
             Vars.StopCrosshair()
@@ -5805,6 +5917,7 @@ do
         Vars.StopExploitNoclip()
         Vars.StopExploitFly()
         Vars.StopExploitTeleport()
+        if Vars.StopFling then pcall(Vars.StopFling) end
         Vars.StopHideBody()
         Vars.StopAimAssist()
         Vars.StopCrosshair()
@@ -5874,8 +5987,8 @@ do
         if _env.TownUI_Window then
             pcall(function()
                 _env.TownUI_Window:Notify(
-                    "Town Complete v9.9.4",
-                    "RightShift = Menu | Y = Helper | End = Panic",
+                    "Town Complete v9.9.5",
+                    "RightShift = Menu | Y = Helper | End = Panic | Fling en Exploit",
                     6, "Success"
                 )
             end)
