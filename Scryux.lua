@@ -1,7 +1,7 @@
 --!strict
 -- ============================================================
--- Town Complete v9.8.3 (Scryux UI) - Parte 1/3
--- Fixes: HumanoidStateType.Dying, UI mejorada, HUD Adonis
+-- Town Complete v9.9.0 (Scryux UI) - Parte 1/3
+-- Sync + Desync (Seat+Weld) + Gravel.cc integration
 -- ============================================================
 
 local _env = getgenv and getgenv() or _G
@@ -54,7 +54,7 @@ do
         "https://raw.githubusercontent.com/player2dwhite-tech/Scryux-Library/main/Scryux-Library.lua",
     }
     local CACHE_FILE = "scryux_ui_cache.lua"
-    local CACHE_VERSION = "v9.8.3"
+    local CACHE_VERSION = "v9.9.0"
 
     local function SafeRequest(url)
         if Has("request") then
@@ -149,6 +149,14 @@ do
         game:GetService("Stats"),
         game:GetService("Lighting")
 
+    local VirtualInputManager = nil
+    pcall(function() VirtualInputManager = game:GetService("VirtualInputManager") end)
+
+    local HttpService = game:GetService("HttpService")
+    local MarketplaceService = game:GetService("MarketplaceService")
+    local TweenService = game:GetService("TweenService")
+    local SoundService = game:GetService("SoundService")
+
     local LP = Players.LocalPlayer
     local Workspace = workspace
     local function GetCamera() return Workspace.CurrentCamera end
@@ -159,6 +167,11 @@ do
     Vars.CoreGui = CoreGui
     Vars.Stats = Stats
     Vars.Lighting = Lighting
+    Vars.VirtualInputManager = VirtualInputManager
+    Vars.HttpService = HttpService
+    Vars.MarketplaceService = MarketplaceService
+    Vars.TweenService = TweenService
+    Vars.SoundService = SoundService
     Vars.LP = LP
     Vars.Workspace = Workspace
     Vars.GetCamera = GetCamera
@@ -176,12 +189,12 @@ do
     Vars.table_insert = table.insert
     Vars.table_remove = table.remove
     Vars.table_clear = table.clear
+    Vars.table_concat = table.concat
     Vars.os_clock = os.clock
     Vars.string_find = string.find
 
     Vars.isScriptUnloaded = false
     Vars.activePlayers = {}
-    Vars.uniqueId = tostring(math.random(100000, 999999))
 
     Vars.aimKeyHeld = false
     Vars.isLocalDead = false
@@ -223,24 +236,18 @@ do
 
     Vars.ItemESPList = {}
 
-    Vars.targetIndicator = nil
-    Vars.Bar = nil
-
     Vars.strafeConnection = nil
-    Vars.strafeOriginalWalkspeed = nil
     Vars.strafeKeyLeftHeld = false
     Vars.strafeKeyRightHeld = false
 
     Vars.spinbotConnection = nil
     Vars.spinbotActive = false
-    Vars.spinbotOriginalCFrame = nil
 
     Vars.hideBodyConnection = nil
 
     Vars.TracerPool = {}
     Vars.TracerPoolMAX = 64
     Vars.ActiveTracers = {}
-    Vars.tracerConnections = {}
     Vars.tracerLoopConn = nil
 
     Vars.stickyTarget = nil
@@ -264,7 +271,6 @@ do
 
     Vars.deadBlacklist = {}
     Vars.DEAD_BLACKLIST_DURATION = 3
-
     Vars.whitelist = {}
 
     Vars.CrosshairLines = {}
@@ -289,21 +295,100 @@ do
     Vars.currentHybridPartName = nil
 
     Vars.espSkeletonConn = nil
-
     Vars.OriginalLighting = nil
     Vars.lightingChildAddedConn = nil
-
     Vars.lastESPUpdate = 0
     Vars.lastSkeletonUpdate = 0
 
-    -- UI elements
+    -- HUD
     Vars.HudBackground = nil
     Vars.HudLabel = nil
-    Vars.HudAccent = nil
+    Vars.HudRightLabel = nil
+    Vars.HudAccentLine = nil
 
-    -- ============================================================
+    -- Fun
+    Vars.funConn = nil
+    Vars.ragebotLastFire = 0
+    Vars.ragebotTarget = nil
+    Vars.orbitAngle = 0
+    Vars.ragebotOrbitLastFire = 0
+    Vars.ragebotOrbitTarget = nil
+    Vars.blitzLastFire = 0
+    Vars.blitzKilledPlayers = {}
+
+    -- ============================================
+    -- v9.9.0: Sync + Desync + Gravel.cc integration
+    -- ============================================
+    -- Sync Booster (existente)
+    Vars.syncData = nil  -- se inicializa en Bloque 8
+
+    -- Desync (Seat + Weld - estilo Gravel)
+    Vars.desyncActive = false
+    Vars.desyncSeat = nil
+    Vars.desyncWeld = nil
+    Vars.desyncConnection = nil
+    Vars.desyncCleanupConn = nil
+    Vars.desyncSavedCFrame = nil
+    Vars.desyncHiddenPos = nil
+    Vars.desyncCharConn = nil
+    Vars.desyncLoop = nil
+
+    -- AntiKick
+    Vars.antikickOriginal = nil
+
+    -- Indicator
+    Vars.indicatorGui = nil
+    Vars.indicatorFrame = nil
+    Vars.indicatorLabel = nil
+    Vars.indicatorConn = nil
+    Vars.indicatorDragging = false
+    Vars.indicatorDragStart = nil
+    Vars.indicatorStartPos = nil
+
+    -- Quick Toggles
+    Vars.quickTogglesGui = nil
+    Vars.qtConn = nil
+    Vars.qtDragging = false
+    Vars.qtDragStart = nil
+    Vars.qtStartPos = nil
+
+    -- Hitbox Visualizer
+    Vars.hitboxVisualizers = {}
+
+    -- World
+    Vars.worldXrayParts = {}
+    Vars.worldXrayActive = false
+    Vars.loopFireLast = 0
+
+    -- Camera
+    Vars.camYConn = nil
+    Vars.cframeViewConn = nil
+    Vars.camYOriginal = nil
+
+    -- World Proximity / Loop Fire
+    Vars.worldProximityConn = nil
+    Vars.loopFireConn = nil
+
+    -- Truss
+    Vars.trussPart = nil
+    Vars.trussConn = nil
+
+    -- Airwalk
+    Vars.airwalkPart = nil
+    Vars.airwalkConn = nil
+
+    -- Flight
+    Vars.flightBodyGyro = nil
+    Vars.flightBodyVelocity = nil
+    Vars.flightConn = nil
+
+    -- Autorespawn
+    Vars.autorespawnConns = {}
+    Vars.autorespawnDeathPos = nil
+
+    -- ============================================
     -- CONFIGURACIÓN
-    -- ============================================================
+    -- ============================================
     Settings = {
         ESP = {
             Enabled = true, Chams = true, TeamCheck = false,
@@ -330,6 +415,7 @@ do
             Weapons = false,
             WeaponColor = Color3.fromRGB(255, 0, 255),
             WeaponTextSize = 16,
+            ColorByHealth = false,
             Colors = {
                 Visible = Color3.fromRGB(255, 0, 0),
                 Partial = Color3.fromRGB(255, 200, 0),
@@ -356,27 +442,17 @@ do
             AimPartMode = "Selective FOV",
             Selective = {
                 Enabled = true,
-                HeadZoneTop = 0.0,
                 HeadZoneBottom = 0.35,
-                TorsoZoneTop = 0.35,
                 TorsoZoneBottom = 0.70,
-                LegsZoneTop = 0.70,
-                LegsZoneBottom = 1.0,
-                LeftArmZoneLeft = 0.0,
                 LeftArmZoneRight = 0.35,
-                CenterZoneLeft = 0.35,
-                CenterZoneRight = 0.65,
                 RightArmZoneLeft = 0.65,
-                RightArmZoneRight = 1.0,
                 TransitionSmoothing = 0.85,
                 DeadzoneRadius = 0.05,
             },
             Hybrid = {
-                Enabled = false,
-                BasePart = "Head",
+                Enabled = false, BasePart = "Head",
                 VerticalBiasThreshold = 0.15,
-                DownwardSmoothness = 0.7,
-                AllowReturn = true,
+                DownwardSmoothness = 0.7, AllowReturn = true,
             },
             HelperSmoothness = 0.15, BaseSmoothness = 0.15,
             UsePrediction = false, PredictionAmount = 0.13,
@@ -385,18 +461,12 @@ do
             StickyLock = false, StickyTimeout = 2,
             RequireGun = true,
             BonePriority = {
-                Head = 1.0,
-                UpperTorso = 0.7,
-                LowerTorso = 0.6,
+                Head = 1.0, UpperTorso = 0.7, LowerTorso = 0.6,
                 HumanoidRootPart = 0.5,
-                LeftUpperArm = 0.35,
-                RightUpperArm = 0.35,
-                LeftLowerArm = 0.25,
-                RightLowerArm = 0.25,
-                LeftUpperLeg = 0.3,
-                RightUpperLeg = 0.3,
-                LeftLowerLeg = 0.2,
-                RightLowerLeg = 0.2,
+                LeftUpperArm = 0.35, RightUpperArm = 0.35,
+                LeftLowerArm = 0.25, RightLowerArm = 0.25,
+                LeftUpperLeg = 0.3, RightUpperLeg = 0.3,
+                LeftLowerLeg = 0.2, RightLowerLeg = 0.2,
             },
             Anti360 = { Enabled = false, DetectionDistance = 1.5, Hysteresis = 1.5, ReEnableDelay = 0.25 }
         },
@@ -407,8 +477,7 @@ do
             TeamCheck = false, IgnorePassive = true, WallCheck = false,
             Visible = true, UseMouse = false, Priority = "Distance",
             UsePrediction = false, PredictionAmount = 0.13,
-            UsePingPrediction = false,
-            Selective = false,
+            UsePingPrediction = false, Selective = false,
         },
         WeaponMods = { NoRecoil = false },
         Visuals = {
@@ -426,10 +495,10 @@ do
             CrosshairTransparency = 1,
             CrosshairGap = 4,
         },
+        -- ✅ SYNC (existente, NO TOCAR)
         Sync = { Enabled = false, TryFFlagFallback = false, AutoDisableOnLowFPS = false },
-        HUD = { Enabled = true, ShowFPS = true, ShowPing = true, Position = "BottomCenter" },
+        HUD = { Enabled = true, ShowFPS = true, ShowPing = true },
         Performance = { ESPUpdateRate = 0.03, SkeletonUpdateRate = 0.04 },
-        UI = { ShowScreenBar = true },
         AntiFall = { Enabled = false },
         Movement = {
             StrafeEnabled = false, StrafeDistance = 0.3, PeekCooldown = 0.08,
@@ -448,6 +517,93 @@ do
             Panic = Enum.KeyCode.End,
         },
         Backtrack = { Enabled = false, Delay = 0.1, ShowIndicator = false },
+        Fun = {
+            RagebotEnabled = false,
+            RagebotFOV = 360,
+            RagebotMaxDistance = 500,
+            RagebotFireRate = 0.05,
+            RagebotAimPart = "Head",
+            RagebotTeamCheck = true,
+            RagebotUseCurrentTarget = false,
+            RagebotSilentAim = true,
+            OrbitEnabled = false,
+            OrbitSpeed = 3, OrbitRadius = 8, OrbitHeight = 2,
+            OrbitTargetPart = "HumanoidRootPart",
+            OrbitLockCamera = false,
+            RagebotOrbitEnabled = false,
+            RagebotOrbitSpeed = 3, RagebotOrbitRadius = 8,
+            BlitzEnabled = false,
+            BlitzSpeed = 1000, BlitzFireRate = 0.01,
+            BlitzTeleportRange = 5000,
+        },
+        -- ============================================
+        -- v9.9.0 ADVANCED
+        -- ============================================
+        Advanced = {
+            -- AntiKick
+            AntiKick = true,
+
+            -- Hitbox avanzado
+            HitChance = 100,
+            HeadshotChance = 100,
+            STS_Distance = 5,
+            ScaleToScreen = false,
+            MaxExpansion = 8,
+
+            -- Hitbox Visualizer
+            HitboxViz_Enabled = false,
+            HitboxViz_Shape = "Block",
+            HitboxViz_Material = "Neon",
+            HitboxViz_Transparency = 0.6,
+            HitboxViz_Color = Color3.fromRGB(255, 0, 0),
+            HitboxViz_Gap = 0.4,
+
+            -- Indicator UI
+            Indicator_Enabled = false,
+            Indicator_Draggable = true,
+
+            -- Quick Toggles
+            QT_Enabled = false,
+            QT_Draggable = true,
+
+            -- Camera Y Offset
+            CamY_Enabled = false,
+            CamY_Offset = 0,
+
+            -- CFrame View
+            CFrameView_Enabled = false,
+
+            -- World Proximity
+            WP_Enabled = false,
+            WP_HoldDuration = 0,
+            WP_MaxActivation = 100,
+
+            -- World Xray
+            WX_Enabled = false,
+            WX_Transparency = 0.5,
+            WX_Blacklist = {"Humanoid"},
+
+            -- Loop Fire
+            LF_Enabled = false,
+            LF_Interval = 1,
+            LF_Type = "TouchInterest",  -- TouchInterest / ClickDetector / ProximityPrompt
+
+            -- Movement Extras
+            Truss_Enabled = false,
+            Airwalk_Enabled = false,
+            Autorespawn_Enabled = false,
+            Flight_Enabled = false,
+            Flight_Speed = 50,
+
+            -- ✅ DESYNC (Seat + Weld - estilo Gravel)
+            Desync_Enabled = false,
+            Desync_Transparency = 0.5,
+
+            -- Save/Load
+            SaveFolder = "TownComplete_Saves",
+            SaveExtension = ".json",
+            CurrentSave = nil,
+        },
     }
 
     Vars.Settings = Settings
@@ -717,6 +873,9 @@ do
     end
     Vars.PredictPosition = PredictPosition
 
+    -- ============================================================
+    -- FOV Selectivo
+    -- ============================================================
     local function GetSelectiveBodyPart(player, screenPos, fovCenter, fovRadius)
         if not player or not player.Character then return nil end
         local char = player.Character
@@ -727,8 +886,7 @@ do
         if not rigType then return nil end
 
         local delta = V2(screenPos.X - fovCenter.X, screenPos.Y - fovCenter.Y)
-        local distFromCenter = delta.Magnitude
-        if distFromCenter < 0.01 then
+        if delta.Magnitude < 0.01 then
             return char:FindFirstChild("Head") or char:FindFirstChild("Torso") or char:FindFirstChild("UpperTorso")
         end
 
@@ -736,61 +894,36 @@ do
         local normY = math.clamp((delta.Y + fovRadius) / (fovRadius * 2), 0, 1)
 
         local verticalZone = "torso"
-        if normY <= cfg.HeadZoneBottom then
-            verticalZone = "head"
-        elseif normY <= cfg.TorsoZoneBottom then
-            verticalZone = "torso"
-        else
-            verticalZone = "legs"
-        end
+        if normY <= cfg.HeadZoneBottom then verticalZone = "head"
+        elseif normY <= cfg.TorsoZoneBottom then verticalZone = "torso"
+        else verticalZone = "legs" end
 
         local horizontalZone = "center"
-        if normX <= cfg.LeftArmZoneRight then
-            horizontalZone = "left"
-        elseif normX >= cfg.RightArmZoneLeft then
-            horizontalZone = "right"
-        end
+        if normX <= cfg.LeftArmZoneRight then horizontalZone = "left"
+        elseif normX >= cfg.RightArmZoneLeft then horizontalZone = "right" end
 
         local partName
         if rigType == "R15" then
-            if verticalZone == "head" then
-                partName = "Head"
+            if verticalZone == "head" then partName = "Head"
             elseif verticalZone == "torso" then
-                if horizontalZone == "left" then
-                    partName = "LeftUpperArm"
-                elseif horizontalZone == "right" then
-                    partName = "RightUpperArm"
-                else
-                    partName = "UpperTorso"
-                end
+                if horizontalZone == "left" then partName = "LeftUpperArm"
+                elseif horizontalZone == "right" then partName = "RightUpperArm"
+                else partName = "UpperTorso" end
             else
-                if horizontalZone == "left" then
-                    partName = "LeftUpperLeg"
-                elseif horizontalZone == "right" then
-                    partName = "RightUpperLeg"
-                else
-                    partName = "LowerTorso"
-                end
+                if horizontalZone == "left" then partName = "LeftUpperLeg"
+                elseif horizontalZone == "right" then partName = "RightUpperLeg"
+                else partName = "LowerTorso" end
             end
         else
-            if verticalZone == "head" then
-                partName = "Head"
+            if verticalZone == "head" then partName = "Head"
             elseif verticalZone == "torso" then
-                if horizontalZone == "left" then
-                    partName = "Left Arm"
-                elseif horizontalZone == "right" then
-                    partName = "Right Arm"
-                else
-                    partName = "Torso"
-                end
+                if horizontalZone == "left" then partName = "Left Arm"
+                elseif horizontalZone == "right" then partName = "Right Arm"
+                else partName = "Torso" end
             else
-                if horizontalZone == "left" then
-                    partName = "Left Leg"
-                elseif horizontalZone == "right" then
-                    partName = "Right Leg"
-                else
-                    partName = "Torso"
-                end
+                if horizontalZone == "left" then partName = "Left Leg"
+                elseif horizontalZone == "right" then partName = "Right Leg"
+                else partName = "Torso" end
             end
         end
 
@@ -802,10 +935,10 @@ do
     end
     Vars.GetSelectiveBodyPart = GetSelectiveBodyPart
 
-    local hybridState = {
-        currentPart = "Head",
-        lastChange = 0,
-    }
+    -- ============================================================
+    -- Modo Híbrido
+    -- ============================================================
+    local hybridState = { currentPart = "Head", lastChange = 0 }
     local function GetHybridBodyPart(player, screenPos, fovCenter, fovRadius)
         if not player or not player.Character then return nil end
         local char = player.Character
@@ -813,19 +946,12 @@ do
         local now = os_clock()
 
         local delta = V2(screenPos.X - fovCenter.X, screenPos.Y - fovCenter.Y)
-        local normY = (delta.Y + fovRadius) / (fovRadius * 2)
-        normY = math.clamp(normY, 0, 1)
+        local normY = math.clamp((delta.Y + fovRadius) / (fovRadius * 2), 0, 1)
 
         local targetPart = cfg.BasePart
-        if normY > 0.5 + cfg.VerticalBiasThreshold then
-            targetPart = "UpperTorso"
-        end
-        if normY > 0.75 + cfg.VerticalBiasThreshold then
-            targetPart = "LowerTorso"
-        end
-        if not cfg.AllowReturn and normY < 0.5 then
-            targetPart = hybridState.currentPart
-        end
+        if normY > 0.5 + cfg.VerticalBiasThreshold then targetPart = "UpperTorso" end
+        if normY > 0.75 + cfg.VerticalBiasThreshold then targetPart = "LowerTorso" end
+        if not cfg.AllowReturn and normY < 0.5 then targetPart = hybridState.currentPart end
 
         if targetPart ~= hybridState.currentPart then
             if (now - hybridState.lastChange) > 0.15 then
@@ -848,6 +974,9 @@ do
     end
     Vars.GetHybridBodyPart = GetHybridBodyPart
 
+    -- ============================================================
+    -- Bone Priority
+    -- ============================================================
     local function GetBestBodyPartByPriority(player, cam)
         if not player or not player.Character then return nil end
         local char = player.Character
@@ -874,6 +1003,9 @@ do
     end
     Vars.GetBestBodyPartByPriority = GetBestBodyPartByPriority
 
+    -- ============================================================
+    -- Backtrack
+    -- ============================================================
     local function UpdatePositionHistory()
         local now = os_clock()
         for _, p in ipairs(Vars.activePlayers) do
@@ -944,6 +1076,17 @@ do
     local GetRigType = Vars.GetRigType
     local GetBonesForRig = Vars.GetBonesForRig
     local SilentPcall = Vars.SilentPcall
+
+    -- ============================================================
+    -- Color by health helper
+    -- ============================================================
+    local function healthColor(hum)
+        if not hum then return Settings.ESP.Colors.Visible end
+        local maxH = hum.MaxHealth or 100
+        local hp = math_clamp(hum.Health / maxH, 0, 1)
+        return Color3.new(1 - hp, hp, 0)
+    end
+    Vars.healthColor = healthColor
 
     -- ============================================================
     -- Skeleton line pool
@@ -1099,9 +1242,13 @@ do
         if IsPassive(player.Name) then return Settings.ESP.Colors.Passive end
         local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
         if hum and hum.Health <= 0 then return Settings.ESP.Colors.Dead end
+        if Settings.ESP.ColorByHealth and hum then return healthColor(hum) end
         return Settings.ESP.Colors.Visible
     end
 
+    -- ============================================================
+    -- Update ESP
+    -- ============================================================
     local function UpdateESPForPlayer(player)
         if not player or player == LP then return end
 
@@ -1126,6 +1273,7 @@ do
         local boxPos, boxSize, isVisible = GetBoundingVectors(char)
         local color = GetESPColor(player)
 
+        -- Chams
         if Settings.ESP.Chams then
             esp.chams.Adornee = char
             esp.chams.FillColor = color
@@ -1149,6 +1297,7 @@ do
             return
         end
 
+        -- Box
         esp.box.Visible = Settings.ESP.Box
         if Settings.ESP.Box then
             esp.box.Position = boxPos
@@ -1157,6 +1306,7 @@ do
             esp.box.Thickness = Settings.ESP.BoxThickness
         end
 
+        -- Health
         if Settings.ESP.ShowHealth then
             local hp = math_clamp(hum.Health / math_max(hum.MaxHealth, 1), 0, 1)
             esp.health.From = V2(boxPos.X - 5, boxPos.Y + boxSize.Y)
@@ -1168,6 +1318,7 @@ do
             esp.health.Visible = false
         end
 
+        -- Name
         if Settings.ESP.ShowName then
             local text = player.Name
             if Settings.ESP.ShowDistance and LP.Character then
@@ -1185,6 +1336,7 @@ do
             esp.name.Visible = false
         end
 
+        -- Head Dot
         if Settings.ESP.HeadDots and esp.headDot then
             local head = char:FindFirstChild("Head")
             if head then
@@ -1206,6 +1358,7 @@ do
             esp.headDot.Visible = false
         end
 
+        -- Weapon
         if Settings.ESP.Weapons and esp.weapon then
             local tool = char:FindFirstChildOfClass("Tool")
             if tool then
@@ -1223,6 +1376,9 @@ do
     end
     Vars.UpdateESPForPlayer = UpdateESPForPlayer
 
+    -- ============================================================
+    -- Update Skeleton
+    -- ============================================================
     local function UpdateSkeletonForPlayer(player)
         if not player or player == LP or not Settings.Skeleton.Enabled then
             ClearSkeletonForPlayer(player and player.Name)
@@ -1435,6 +1591,7 @@ do
     Vars.RebuildActivePlayers = RebuildActivePlayers
     RebuildActivePlayers()
 
+    -- Loop unificado ESP + Skeleton
     Vars.espSkeletonConn = Vars.RunService.RenderStepped:Connect(function()
         if Vars.isScriptUnloaded then return end
 
@@ -1446,11 +1603,9 @@ do
             local espRate = Settings.Performance.ESPUpdateRate or 0.03
             if (now - Vars.lastESPUpdate) >= espRate then
                 Vars.lastESPUpdate = now
-
                 for i = 1, #players do
                     SilentPcall(UpdateESPForPlayer, players[i])
                 end
-
                 if Settings.ESP.Items then
                     SilentPcall(UpdateItemESP)
                 end
@@ -1461,7 +1616,6 @@ do
             local skRate = Settings.Performance.SkeletonUpdateRate or 0.04
             if (now - Vars.lastSkeletonUpdate) >= skRate then
                 Vars.lastSkeletonUpdate = now
-
                 for i = 1, #players do
                     SilentPcall(UpdateSkeletonForPlayer, players[i])
                 end
@@ -1516,7 +1670,6 @@ do
     HudLabel.Center = false
     Vars.HudLabel = HudLabel
 
-    -- Label secundario para el modo de aim (a la derecha)
     local HudRightLabel = Drawing.new("Text")
     HudRightLabel.Visible = false
     HudRightLabel.Size = 15
@@ -1570,13 +1723,14 @@ do
         if not cam then return end
         local viewport = cam.ViewportSize
 
-        -- Construir texto izquierdo
-        local leftParts = {
-            "PING " .. cachedPing .. "ms",
-            "FPS " .. cachedFPS,
-        }
+        local leftParts = {}
+        if Settings.HUD.ShowPing then
+            table_insert(leftParts, "PING " .. cachedPing .. "ms")
+        end
+        if Settings.HUD.ShowFPS then
+            table_insert(leftParts, "FPS " .. cachedFPS)
+        end
 
-        -- Target
         if Vars.TargetManager then
             local t = Vars.TargetManager:GetCurrentTarget()
             if t and t.player then
@@ -1586,27 +1740,25 @@ do
             end
         end
 
-        -- Hotkeys
         table_insert(leftParts, "MENU " .. Settings.Hotkeys.ToggleMenu.Name)
+        if Settings.Sync.Enabled then table_insert(leftParts, "SYNC") end
+        if Settings.Advanced.Desync_Enabled then table_insert(leftParts, "DESYNC") end
+        if Settings.Advanced.AntiKick then table_insert(leftParts, "ANTIKICK") end
 
         local leftText = table_concat(leftParts, "  |  ")
 
-        -- Texto derecho: modo aim
         local rightText = ""
         if Settings.Aimbot.Enabled then
             local mode = Settings.Aimbot.AimPartMode
             if mode == "Selective FOV" then
-                local partName = Vars.currentSelectivePartName or "Auto"
-                rightText = "AIM Selective (" .. partName .. ")"
+                rightText = "AIM Selective (" .. (Vars.currentSelectivePartName or "Auto") .. ")"
             elseif mode == "Hybrid" then
-                local partName = Vars.currentHybridPartName or "Head"
-                rightText = "AIM Hybrid (" .. partName .. ")"
+                rightText = "AIM Hybrid (" .. (Vars.currentHybridPartName or "Head") .. ")"
             else
                 rightText = "AIM " .. mode
             end
         end
 
-        -- Color según FPS
         if cachedFPS >= 60 then
             HudLabel.Color = Color3.fromRGB(0, 255, 120)
         elseif cachedFPS >= 30 then
@@ -1618,7 +1770,6 @@ do
         HudLabel.Text = leftText
         HudRightLabel.Text = rightText
 
-        -- Barra abajo
         local barHeight = 24
         local barY = viewport.Y - barHeight - 6
         local barX = 8
@@ -1644,6 +1795,9 @@ do
         end
     end)
 
+    -- ============================================================
+    -- Player events
+    -- ============================================================
     Vars.playerAddedConn = Players.PlayerAdded:Connect(function(p)
         if p ~= LP then Vars.RebuildActivePlayers() end
     end)
@@ -1678,7 +1832,7 @@ do
     end
 
     -- ============================================================
-    -- Visuals / Lighting
+    -- Lighting
     -- ============================================================
     local function SaveOriginalLighting()
         if Vars.OriginalLighting then return end
@@ -1942,7 +2096,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 6: Bullet Tracers + No Recoil + X-Ray
+-- BLOQUE 6: Tracers + No Recoil + X-Ray
 -- ============================================================
 do
     local RunService = Vars.RunService
@@ -1958,12 +2112,12 @@ do
 
     local GetCamera = Vars.GetCamera
 
+    -- ============================================================
+    -- Tracers
+    -- ============================================================
     local function AcquireTracer()
         local t = table_remove(Vars.TracerPool)
-        if t then
-            t.Visible = false
-            return t
-        end
+        if t then t.Visible = false; return t end
         t = Drawing.new("Line")
         t.Thickness = 2
         t.Visible = false
@@ -1983,7 +2137,6 @@ do
     local function CreateTracer(fromPos, toPos)
         if not Settings.Visuals.BulletTracers then return end
         if not fromPos or not toPos then return end
-
         local dist = (fromPos - toPos).Magnitude
         if dist > Settings.Visuals.TracerMaxDistance then return end
 
@@ -2000,36 +2153,28 @@ do
         tracer.Visible = true
 
         table_insert(Vars.ActiveTracers, {
-            tracer = tracer,
-            fromPos = fromPos,
-            toPos = toPos,
-            startTime = os_clock(),
-            lifetime = Settings.Visuals.TracerLifetime,
+            tracer = tracer, fromPos = fromPos, toPos = toPos,
+            startTime = os_clock(), lifetime = Settings.Visuals.TracerLifetime,
         })
     end
     Vars.CreateTracer = CreateTracer
 
     local function UpdateTracers()
         if Vars.isScriptUnloaded then return end
-
         local cam = GetCamera()
         if not cam then return end
-
         local now = os_clock()
         local i = 1
-
         while i <= #Vars.ActiveTracers do
             local data = Vars.ActiveTracers[i]
             local age = now - data.startTime
-
             if age >= data.lifetime then
                 ReleaseTracer(data.tracer)
                 table_remove(Vars.ActiveTracers, i)
             else
-                local v1, onScreen1 = cam:WorldToViewportPoint(data.fromPos)
-                local v2, onScreen2 = cam:WorldToViewportPoint(data.toPos)
-
-                if onScreen1 or onScreen2 then
+                local v1, o1 = cam:WorldToViewportPoint(data.fromPos)
+                local v2, o2 = cam:WorldToViewportPoint(data.toPos)
+                if o1 or o2 then
                     data.tracer.From = V2(v1.X, v1.Y)
                     data.tracer.To = V2(v2.X, v2.Y)
                     data.tracer.Transparency = age / data.lifetime
@@ -2065,7 +2210,6 @@ do
             ReleaseTracer(data.tracer)
         end
         table_clear(Vars.ActiveTracers)
-
         for _, t in ipairs(Vars.TracerPool) do
             pcall(function() t:Remove() end)
         end
@@ -2390,6 +2534,9 @@ do
     end
     Vars.GetNearestBodyPart = GetNearestBodyPart
 
+    -- ============================================================
+    -- Target Manager
+    -- ============================================================
     local TargetManager = {}
     local currentTarget = nil
 
@@ -2490,9 +2637,7 @@ do
         return candidates
     end
 
-    -- ============================================================
-    -- FIX: ValidateTarget sin Enum.HumanoidStateType.Dying
-    -- ============================================================
+    -- ✅ FIX: sin Enum.HumanoidStateType.Dying
     function TargetManager:ValidateTarget(player)
         if not player or player == LP then return false end
         if IsDeadBlacklisted(player.Name) then return false end
@@ -2505,19 +2650,16 @@ do
             return false
         end
         local state = hum:GetState()
-        -- ✅ FIX: solo Dead y Physics (Dying no existe en este Enum)
         if state == Enum.HumanoidStateType.Dead
             or state == Enum.HumanoidStateType.Physics then
             AddToDeadBlacklist(player.Name)
             return false
         end
-        -- Validar HRP
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if not hrp then
             AddToDeadBlacklist(player.Name)
             return false
         end
-        -- Validar Ragdoll
         if state == Enum.HumanoidStateType.Ragdoll then
             AddToDeadBlacklist(player.Name)
             return false
@@ -2617,6 +2759,9 @@ do
 
     Vars.TargetManager = TargetManager
 
+    -- ============================================================
+    -- Anti-360
+    -- ============================================================
     local function CheckAnti360()
         if not Settings.Aimbot.Anti360.Enabled then
             Vars.anti360Active = false
@@ -2670,6 +2815,9 @@ do
     end
     Vars.CheckAnti360 = CheckAnti360
 
+    -- ============================================================
+    -- Main Aimbot Loop
+    -- ============================================================
     local lastFrameTime = 0
     local function MainAimbotLoop()
         if Vars.isScriptUnloaded or not Settings.Aimbot.Enabled then return end
@@ -2855,6 +3003,9 @@ do
 
     Vars.aimbotConn = RunService.RenderStepped:Connect(MainAimbotLoop)
 
+    -- ============================================================
+    -- FOV Circle
+    -- ============================================================
     local fovCircle = nil
     Vars.fovConn = RunService.RenderStepped:Connect(function()
         if Vars.isScriptUnloaded then return end
@@ -2876,6 +3027,9 @@ do
     end)
     Vars.GetFOVCircle = function() return fovCircle end
 
+    -- ============================================================
+    -- Target indicator
+    -- ============================================================
     local targetIndicator = nil
     Vars.targetIndicatorConn = RunService.RenderStepped:Connect(function()
         if Vars.isScriptUnloaded then return end
@@ -2902,6 +3056,9 @@ do
     end)
     Vars.GetTargetIndicator = function() return targetIndicator end
 
+    -- ============================================================
+    -- Hotkeys (Helper)
+    -- ============================================================
     Vars.aimKeyBeganConn = UserInputService.InputBegan:Connect(function(input, gp)
         if gp then return end
         if input.KeyCode == Settings.Hotkeys.Helper then
@@ -3087,7 +3244,6 @@ do
     local UserInputService = Vars.UserInputService
     local LP = Vars.LP
     local Settings = Vars.Settings
-    local V2 = Vars.Vector2_new
     local V3 = Vars.Vector3_new
     local CFrame_new = Vars.CFrame_new
     local math_rad = Vars.math_rad
@@ -3125,6 +3281,7 @@ do
         UPDATE_INTERVAL = 0.05, originalFPSCap = nil,
         radiusResetCount = 0, lowFPSCount = 0, fflagFallbackTried = false,
     }
+    Vars.syncData = syncData
 
     local function ApplySimulationRadius(radius, maxRadius, force)
         if not force then
@@ -3220,6 +3377,144 @@ do
             end
         end
     end)
+
+    -- ============================================================
+    -- DESYNC (Seat + Weld - estilo Gravel)
+    -- Mueve tu personaje REAL a una posición oculta mientras
+    -- tu personaje VISUAL se queda donde lo dejaste.
+    -- ============================================================
+    local function CreateDesyncSeat()
+        if Vars.desyncSeat and Vars.desyncSeat.Parent then
+            return Vars.desyncSeat
+        end
+
+        local seat = Instance.new("Seat")
+        seat.Name = "TC_DesyncSeat_" .. tostring(math.random(10000, 99999))
+        seat.Size = V3(2, 1, 2)
+        seat.Transparency = 1
+        seat.CanCollide = false
+        seat.Anchored = true
+        seat.Massless = true
+        seat.CanQuery = false
+        seat.CanTouch = false
+        seat.Parent = Vars.Workspace
+
+        Vars.desyncSeat = seat
+        return seat
+    end
+
+    local function StartDesync()
+        if Vars.desyncActive then return end
+        if not LP.Character then return end
+
+        local char = LP.Character
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not hum or not root then return end
+
+        -- Guardar CFrame original
+        Vars.desyncSavedCFrame = root.CFrame
+
+        -- Crear seat oculto en una posición alejada
+        local hiddenPos = root.Position + V3(0, -5000, 0)
+        Vars.desyncHiddenPos = hiddenPos
+
+        local seat = CreateDesyncSeat()
+        seat.CFrame = CFrame_new(hiddenPos)
+
+        -- Sentar al humanoide en el seat (fuerza el CFrame real al seat)
+        pcall(function()
+            local weld = Instance.new("WeldConstraint")
+            weld.Name = "TC_DesyncWeld"
+            weld.Part0 = root
+            weld.Part1 = seat
+            weld.Parent = root
+            Vars.desyncWeld = weld
+            hum.Sit = true
+            root.CFrame = CFrame_new(hiddenPos)
+        end)
+
+        -- Aplicar transparencia al personaje visual
+        local trans = Settings.Advanced.Desync_Transparency
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                if part:GetAttribute("TC_DesyncOrig") == nil then
+                    part:SetAttribute("TC_DesyncOrig", part.LocalTransparencyModifier)
+                end
+                part.LocalTransparencyModifier = trans
+            end
+        end
+
+        -- Loop para mantener el desync
+        Vars.desyncConnection = RunService.Heartbeat:Connect(function()
+            if not Vars.desyncActive then return end
+            if not LP.Character then return end
+            local r = LP.Character:FindFirstChild("HumanoidRootPart")
+            if not r then return end
+            -- Mantener el seat alejado del jugador visual
+            if Vars.desyncSeat and Vars.desyncSeat.Parent and Vars.desyncHiddenPos then
+                Vars.desyncSeat.CFrame = CFrame_new(Vars.desyncHiddenPos)
+            end
+        end)
+
+        -- Cleanup al respawn
+        Vars.desyncCharConn = LP.CharacterAdded:Connect(function()
+            StopDesync()
+        end)
+
+        Vars.desyncActive = true
+        Logger.Info("Desync ACTIVADO")
+    end
+
+    local function StopDesync()
+        if not Vars.desyncActive then return end
+        Vars.desyncActive = false
+
+        if Vars.desyncWeld then
+            pcall(function() Vars.desyncWeld:Destroy() end)
+            Vars.desyncWeld = nil
+        end
+        if Vars.desyncSeat then
+            pcall(function() Vars.desyncSeat:Destroy() end)
+            Vars.desyncSeat = nil
+        end
+        if Vars.desyncConnection then
+            pcall(function() Vars.desyncConnection:Disconnect() end)
+            Vars.desyncConnection = nil
+        end
+        if Vars.desyncCharConn then
+            pcall(function() Vars.desyncCharConn:Disconnect() end)
+            Vars.desyncCharConn = nil
+        end
+
+        -- Restaurar transparencia
+        if LP.Character then
+            for _, part in ipairs(LP.Character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    local orig = part:GetAttribute("TC_DesyncOrig")
+                    if orig ~= nil then
+                        part.LocalTransparencyModifier = orig
+                        part:SetAttribute("TC_DesyncOrig", nil)
+                    end
+                end
+            end
+            local hum = LP.Character:FindFirstChildOfClass("Humanoid")
+            if hum then hum.Sit = false end
+            if Vars.desyncSavedCFrame then
+                local root = LP.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    pcall(function() root.CFrame = Vars.desyncSavedCFrame end)
+                end
+            end
+        end
+
+        Vars.desyncSavedCFrame = nil
+        Vars.desyncHiddenPos = nil
+        Logger.Info("Desync DESACTIVADO")
+    end
+
+    Vars.StartDesync = StartDesync
+    Vars.StopDesync = StopDesync
 
     -- ============================================================
     -- Anti-Fall
@@ -3533,58 +3828,1244 @@ do
 end
 
 -- ============================================================
--- BLOQUE 9: UI de Scryux (mejorada estilo Bloxstrap)
+-- BLOQUE 8.5: FUN (Ragebot + Orbit + Ragebot Orbit + Blitz)
+-- ============================================================
+do
+    local Players = Vars.Players
+    local RunService = Vars.RunService
+    local UserInputService = Vars.UserInputService
+    local LP = Vars.LP
+    local Settings = Vars.Settings
+    local V2 = Vars.Vector2_new
+    local V3 = Vars.Vector3_new
+    local CFrame_new = Vars.CFrame_new
+    local math_clamp = Vars.math_clamp
+    local math_rad = Vars.math_rad
+    local math_tan = Vars.math_tan
+    local table_insert = Vars.table_insert
+    local os_clock = Vars.os_clock
+
+    local GetCamera = Vars.GetCamera
+    local IsPassive = Vars.IsPassive
+    local CheckVisibility = Vars.CheckVisibility
+    local VirtualInputManager = Vars.VirtualInputManager
+
+    local function TryFireWeapon()
+        local char = LP.Character
+        if not char then return false end
+        local tool = char:FindFirstChildOfClass("Tool")
+        if tool then pcall(function() tool:Activate() end) end
+        if VirtualInputManager then
+            pcall(function()
+                VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+                task.wait(0.001)
+                VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+            end)
+        end
+        return true
+    end
+
+    local function FindRagebotTarget(maxDist, fov, teamCheck, aimPart)
+        local myChar = LP.Character
+        if not myChar then return nil end
+        local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+        if not myRoot then return nil end
+        local cam = GetCamera()
+        if not cam then return nil end
+        local center = V2(cam.ViewportSize.X / 2, cam.ViewportSize.Y / 2)
+        local best, bestScore = nil, math.huge
+
+        for _, player in ipairs(Vars.activePlayers) do
+            if not player or player == LP then continue end
+            if Vars.IsWhitelisted and Vars.IsWhitelisted(player) then continue end
+            if Vars.IsDeadBlacklisted and Vars.IsDeadBlacklisted(player.Name) then continue end
+            if not player.Character then continue end
+            local hum = player.Character:FindFirstChildOfClass("Humanoid")
+            if not hum or hum.Health <= 0 then continue end
+            if teamCheck and player.Team == LP.Team then continue end
+            if IsPassive and IsPassive(player.Name) then continue end
+            local state = hum:GetState()
+            if state == Enum.HumanoidStateType.Dead or state == Enum.HumanoidStateType.Physics then
+                continue
+            end
+            local targetPart = player.Character:FindFirstChild(aimPart)
+                or player.Character:FindFirstChild("Head")
+                or player.Character:FindFirstChild("HumanoidRootPart")
+            if not targetPart then continue end
+            local tr = player.Character:FindFirstChild("HumanoidRootPart")
+            if not tr then continue end
+            local dist = (myRoot.Position - tr.Position).Magnitude
+            if dist > maxDist then continue end
+            local sp, onScreen = cam:WorldToViewportPoint(targetPart.Position)
+            if not onScreen then continue end
+            local dc = (V2(sp.X, sp.Y) - center).Magnitude
+            if fov < 360 then
+                local fovRadius = (cam.ViewportSize.X / 2) * math_tan(math_rad(fov / 2)) / math_tan(math_rad((cam.FieldOfView or 70) / 2))
+                if dc > fovRadius then continue end
+            end
+            local score = dist * 0.01 + dc * 0.1
+            if score < bestScore then
+                bestScore = score
+                best = { player = player, root = tr, part = targetPart, distance = dist }
+            end
+        end
+        return best
+    end
+
+    local function RagebotTick()
+        if not Settings.Fun.RagebotEnabled then return end
+        if Vars.isLocalDead then return end
+        if type(isrbxactive) == "function" and not isrbxactive() then return end
+        local now = os_clock()
+        if (now - Vars.ragebotLastFire) < Settings.Fun.RagebotFireRate then return end
+        local target
+        if Settings.Fun.RagebotUseCurrentTarget and Vars.TargetManager then
+            local ct = Vars.TargetManager:GetCurrentTarget()
+            if ct and ct.player then
+                target = {
+                    player = ct.player,
+                    root = ct.player.Character and ct.player.Character:FindFirstChild("HumanoidRootPart"),
+                    part = ct.part,
+                    distance = 0,
+                }
+            end
+        end
+        if not target then
+            target = FindRagebotTarget(
+                Settings.Fun.RagebotMaxDistance,
+                Settings.Fun.RagebotFOV,
+                Settings.Fun.RagebotTeamCheck,
+                Settings.Fun.RagebotAimPart
+            )
+        end
+        if not target or not target.part then return end
+        Vars.ragebotTarget = target
+        if not Settings.Fun.RagebotSilentAim then
+            local cam = GetCamera()
+            if cam then
+                pcall(function()
+                    cam.CFrame = CFrame_new(cam.CFrame.Position, target.part.Position)
+                end)
+            end
+        end
+        TryFireWeapon()
+        Vars.ragebotLastFire = now
+    end
+
+    local function GetOrbitTarget()
+        if Vars.TargetManager then
+            local ct = Vars.TargetManager:GetCurrentTarget()
+            if ct and ct.player and ct.player.Character then return ct.player end
+        end
+        if Vars.ragebotTarget and Vars.ragebotTarget.player then return Vars.ragebotTarget.player end
+        if Vars.ragebotOrbitTarget and Vars.ragebotOrbitTarget.player then return Vars.ragebotOrbitTarget.player end
+        return nil
+    end
+
+    local function OrbitTick(dt)
+        if not Settings.Fun.OrbitEnabled then return end
+        if Vars.isLocalDead then return end
+        local target = GetOrbitTarget()
+        if not target or not target.Character then return end
+        local targetPart = target.Character:FindFirstChild(Settings.Fun.OrbitTargetPart)
+            or target.Character:FindFirstChild("HumanoidRootPart")
+        if not targetPart then return end
+        local myChar = LP.Character
+        if not myChar then return end
+        local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+        if not myRoot then return end
+        Vars.orbitAngle = Vars.orbitAngle + Settings.Fun.OrbitSpeed * dt
+        if Vars.orbitAngle > math.pi * 2 then
+            Vars.orbitAngle = Vars.orbitAngle - math.pi * 2
+        end
+        local offsetX = math.cos(Vars.orbitAngle) * Settings.Fun.OrbitRadius
+        local offsetZ = math.sin(Vars.orbitAngle) * Settings.Fun.OrbitRadius
+        local orbitPos = targetPart.Position + V3(offsetX, Settings.Fun.OrbitHeight, offsetZ)
+        pcall(function()
+            myRoot.CFrame = CFrame_new(orbitPos, targetPart.Position)
+        end)
+        if Settings.Fun.OrbitLockCamera then
+            local cam = GetCamera()
+            if cam then
+                pcall(function()
+                    cam.CFrame = CFrame_new(cam.CFrame.Position, targetPart.Position)
+                end)
+            end
+        end
+    end
+
+    local function RagebotOrbitTick(dt)
+        if not Settings.Fun.RagebotOrbitEnabled then return end
+        if Vars.isLocalDead then return end
+        local target = GetOrbitTarget()
+        if not target or not target.Character then return end
+        local targetPart = target.Character:FindFirstChild(Settings.Fun.RagebotAimPart)
+            or target.Character:FindFirstChild("Head")
+        local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+        if not targetPart or not targetRoot then return end
+        local myChar = LP.Character
+        if not myChar then return end
+        local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+        if not myRoot then return end
+        Vars.orbitAngle = Vars.orbitAngle + Settings.Fun.RagebotOrbitSpeed * dt
+        if Vars.orbitAngle > math.pi * 2 then
+            Vars.orbitAngle = Vars.orbitAngle - math.pi * 2
+        end
+        local offsetX = math.cos(Vars.orbitAngle) * Settings.Fun.RagebotOrbitRadius
+        local offsetZ = math.sin(Vars.orbitAngle) * Settings.Fun.RagebotOrbitRadius
+        local orbitPos = targetRoot.Position + V3(offsetX, Settings.Fun.OrbitHeight, offsetZ)
+        pcall(function()
+            myRoot.CFrame = CFrame_new(orbitPos, targetPart.Position)
+        end)
+        local cam = GetCamera()
+        if cam then
+            pcall(function()
+                cam.CFrame = CFrame_new(cam.CFrame.Position, targetPart.Position)
+            end)
+        end
+        local now = os_clock()
+        if (now - Vars.ragebotOrbitLastFire) >= Settings.Fun.RagebotFireRate then
+            TryFireWeapon()
+            Vars.ragebotOrbitLastFire = now
+        end
+        Vars.ragebotOrbitTarget = target
+    end
+
+    local function FindNextBlitzTarget()
+        local myRoot = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+        if not myRoot then return nil end
+        local best, bestDist = nil, math.huge
+        for _, player in ipairs(Vars.activePlayers) do
+            if not player or player == LP then continue end
+            if Vars.IsWhitelisted and Vars.IsWhitelisted(player) then continue end
+            if not player.Character then continue end
+            local hum = player.Character:FindFirstChildOfClass("Humanoid")
+            if not hum or hum.Health <= 0 then continue end
+            if Settings.Fun.RagebotTeamCheck and player.Team == LP.Team then continue end
+            if IsPassive and IsPassive(player.Name) then continue end
+            local state = hum:GetState()
+            if state == Enum.HumanoidStateType.Dead or state == Enum.HumanoidStateType.Physics then
+                continue
+            end
+            local pRoot = player.Character:FindFirstChild("HumanoidRootPart")
+            local pPart = player.Character:FindFirstChild(Settings.Fun.RagebotAimPart)
+                or player.Character:FindFirstChild("Head")
+            if not pRoot or not pPart then continue end
+            local dist = (myRoot.Position - pRoot.Position).Magnitude
+            if dist > Settings.Fun.BlitzTeleportRange then continue end
+            if dist < bestDist then
+                bestDist = dist
+                best = { player = player, root = pRoot, part = pPart, distance = dist }
+            end
+        end
+        return best
+    end
+
+    local function BlitzTick()
+        if not Settings.Fun.BlitzEnabled then return end
+        if Vars.isLocalDead then return end
+        local target = FindNextBlitzTarget()
+        if not target then return end
+        local myChar = LP.Character
+        if not myChar then return end
+        local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+        if not myRoot then return end
+        local teleportPos = target.root.Position + V3(0, 3, 0)
+        pcall(function()
+            myRoot.CFrame = CFrame_new(teleportPos, target.part.Position)
+        end)
+        local cam = GetCamera()
+        if cam then
+            pcall(function()
+                cam.CFrame = CFrame_new(cam.CFrame.Position, target.part.Position)
+            end)
+        end
+        local now = os_clock()
+        if (now - Vars.blitzLastFire) >= Settings.Fun.BlitzFireRate then
+            for i = 1, 3 do TryFireWeapon() end
+            Vars.blitzLastFire = now
+        end
+    end
+
+    local lastFrame = os_clock()
+    Vars.funConn = RunService.RenderStepped:Connect(function()
+        if Vars.isScriptUnloaded then return end
+        local now = os_clock()
+        local dt = now - lastFrame
+        lastFrame = now
+        if dt > 0.5 then dt = 0.5 end
+        if Settings.Fun.RagebotEnabled then pcall(RagebotTick) end
+        if Settings.Fun.OrbitEnabled then pcall(OrbitTick, dt) end
+        if Settings.Fun.RagebotOrbitEnabled then pcall(RagebotOrbitTick, dt) end
+        if Settings.Fun.BlitzEnabled then pcall(BlitzTick) end
+    end)
+
+    Vars.StartRagebot = function() Settings.Fun.RagebotEnabled = true end
+    Vars.StopRagebot = function() Settings.Fun.RagebotEnabled = false end
+    Vars.StartOrbit = function() Settings.Fun.OrbitEnabled = true; Vars.orbitAngle = 0 end
+    Vars.StopOrbit = function() Settings.Fun.OrbitEnabled = false end
+    Vars.StartRagebotOrbit = function() Settings.Fun.RagebotOrbitEnabled = true; Vars.orbitAngle = 0 end
+    Vars.StopRagebotOrbit = function() Settings.Fun.RagebotOrbitEnabled = false end
+    Vars.StartBlitz = function() Settings.Fun.BlitzEnabled = true end
+    Vars.StopBlitz = function() Settings.Fun.BlitzEnabled = false end
+end
+
+-- ============================================================
+-- BLOQUE 8.7: ADVANCED (Gravel.cc integration)
+-- ============================================================
+do
+    local RunService = Vars.RunService
+    local UserInputService = Vars.UserInputService
+    local LP = Vars.LP
+    local Settings = Vars.Settings
+    local Workspace = Vars.Workspace
+    local V2 = Vars.Vector2_new
+    local V3 = Vars.Vector3_new
+    local CFrame_new = Vars.CFrame_new
+    local table_insert = Vars.table_insert
+    local os_clock = Vars.os_clock
+    local math_clamp = Vars.math_clamp
+    local math_rad = Vars.math_rad
+    local math_tan = Vars.math_tan
+
+    local GetCamera = Vars.GetCamera
+
+    -- ============================================================
+    -- 1. AntiKick
+    -- ============================================================
+    local function ApplyAntiKick(state)
+        Settings.Advanced.AntiKick = state
+        if state then
+            if not hookmetamethod or not hookfunction then
+                Logger.Warn("AntiKick: executor sin hooks")
+                Settings.Advanced.AntiKick = false
+                return
+            end
+            if not Vars.antikickOriginal then Vars.antikickOriginal = {} end
+            if not Vars.antikickOriginal.namecall then
+                local oldNamecall
+                oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(...)
+                    local method = getnamecallmethod and getnamecallmethod() or ""
+                    if select(1, ...) == LP and (method == "Kick" or method == "kick") then
+                        return nil
+                    end
+                    return oldNamecall(...)
+                end))
+                Vars.antikickOriginal.namecall = oldNamecall
+            end
+            if not Vars.antikickOriginal.kick then
+                local ok, result = pcall(function()
+                    return hookfunction(LP.Kick, newcclosure(function(self, _)
+                        if self ~= LP then
+                            error("Expected ':' not '.' calling member function Kick", 2)
+                        end
+                        return nil
+                    end))
+                end)
+                if ok then Vars.antikickOriginal.kick = result end
+            end
+            Logger.Info("AntiKick ACTIVADO")
+        else
+            if Vars.antikickOriginal then
+                if Vars.antikickOriginal.namecall then
+                    pcall(function() hookmetamethod(game, "__namecall", Vars.antikickOriginal.namecall) end)
+                    Vars.antikickOriginal.namecall = nil
+                end
+                if Vars.antikickOriginal.kick then
+                    pcall(function() hookfunction(LP.Kick, Vars.antikickOriginal.kick) end)
+                    Vars.antikickOriginal.kick = nil
+                end
+            end
+            Logger.Info("AntiKick DESACTIVADO")
+        end
+    end
+    Vars.ApplyAntiKick = ApplyAntiKick
+
+    task.spawn(function()
+        task.wait(2)
+        if Settings.Advanced.AntiKick then pcall(ApplyAntiKick, true) end
+    end)
+
+    -- ============================================================
+    -- 2. Hitbox Advanced Helpers
+    -- ============================================================
+    local function ShouldExpandHitbox(isHead)
+        local chance = math_clamp(Settings.Advanced.HitChance, 0, 100)
+        if isHead then chance = math_clamp(Settings.Advanced.HeadshotChance, 0, 100) end
+        if chance >= 100 then return true end
+        if chance <= 0 then return false end
+        return math.random(1, 100) <= chance
+    end
+    Vars.ShouldExpandHitbox = ShouldExpandHitbox
+
+    local function CalculateHitboxDiameter(targetPart, cam, screenDist)
+        if not targetPart or not cam then return 1 end
+        local viewport = cam.ViewportSize
+        local H = viewport.Y
+        local vFovRad = math_rad(cam.FieldOfView or 70)
+        local halfVFov = vFovRad / 2
+        local worldDist = (targetPart.Position - cam.CFrame.Position).Magnitude
+        local fovRadius = (cam.ViewportSize.X / 2) * math_tan(math_rad(Settings.Aimbot.FOV / 2)) / math_tan(vFovRad / 2)
+        local alpha = (fovRadius / (H / 2)) * halfVFov
+        local worldHalf = worldDist * math.tan(alpha)
+        local diameter = worldHalf * 2
+
+        local sts = Settings.Advanced.STS_Distance
+        if sts > 0 and worldDist <= sts then
+            diameter = math.max(0.05, math.min(0.1, diameter))
+        end
+        if Settings.Advanced.ScaleToScreen and screenDist and screenDist > 1 then
+            local pixelRadius = math.max(screenDist * 0.5, 1)
+            local scale = screenDist / pixelRadius
+            scale = math_clamp(scale, 1 / Settings.Advanced.MaxExpansion, Settings.Advanced.MaxExpansion)
+            diameter = math.max(0.01, diameter * scale)
+        end
+        return math.max(0.01, diameter)
+    end
+    Vars.CalculateHitboxDiameter = CalculateHitboxDiameter
+
+    -- ============================================================
+    -- 3. Hitbox Visualizer
+    -- ============================================================
+    local function CreateHitboxViz(player, targetPart)
+        if not Settings.Advanced.HitboxViz_Enabled then return nil end
+        if not player or not targetPart or not targetPart.Parent then return nil end
+        local existing = Vars.hitboxVisualizers[player]
+        if existing and existing.part and existing.part.Parent then return existing end
+
+        local shape = Settings.Advanced.HitboxViz_Shape
+        local viz
+        if shape == "Sphere" then
+            viz = Instance.new("Part"); viz.Shape = Enum.PartType.Ball
+        elseif shape == "Cylinder" then
+            viz = Instance.new("Part"); viz.Shape = Enum.PartType.Cylinder
+        else
+            viz = Instance.new("Part"); viz.Shape = Enum.PartType.Block
+        end
+        viz.Name = "TC_HitboxViz_" .. player.Name
+        viz.Size = targetPart.Size + V3(Settings.Advanced.HitboxViz_Gap, Settings.Advanced.HitboxViz_Gap, Settings.Advanced.HitboxViz_Gap)
+        viz.CFrame = targetPart.CFrame
+        viz.Color = Settings.Advanced.HitboxViz_Color
+        viz.Transparency = Settings.Advanced.HitboxViz_Transparency
+        viz.Material = Enum.Material[Settings.Advanced.HitboxViz_Material] or Enum.Material.Neon
+        viz.CanCollide = false
+        viz.Anchored = true
+        viz.CanQuery = false
+        viz.CanTouch = false
+        viz.Parent = Workspace
+        Vars.hitboxVisualizers[player] = { part = viz }
+        return Vars.hitboxVisualizers[player]
+    end
+
+    local function UpdateHitboxViz(player, targetPart)
+        if not Settings.Advanced.HitboxViz_Enabled then
+            local data = Vars.hitboxVisualizers[player]
+            if data and data.part then
+                pcall(function() data.part:Destroy() end)
+                Vars.hitboxVisualizers[player] = nil
+            end
+            return
+        end
+        if not targetPart or not targetPart.Parent then return end
+        local data = CreateHitboxViz(player, targetPart)
+        if not data or not data.part or not data.part.Parent then return end
+        data.part.CFrame = targetPart.CFrame
+        data.part.Size = targetPart.Size + V3(
+            Settings.Advanced.HitboxViz_Gap,
+            Settings.Advanced.HitboxViz_Gap,
+            Settings.Advanced.HitboxViz_Gap
+        )
+        data.part.Color = Settings.Advanced.HitboxViz_Color
+        data.part.Transparency = Settings.Advanced.HitboxViz_Transparency
+        data.part.Material = Enum.Material[Settings.Advanced.HitboxViz_Material] or Enum.Material.Neon
+    end
+    Vars.UpdateHitboxViz = UpdateHitboxViz
+
+    local function ClearAllHitboxViz()
+        for player, data in pairs(Vars.hitboxVisualizers) do
+            if data and data.part then pcall(function() data.part:Destroy() end) end
+        end
+        Vars.hitboxVisualizers = {}
+    end
+    Vars.ClearAllHitboxViz = ClearAllHitboxViz
+
+    -- ============================================================
+    -- 4. Indicator UI
+    -- ============================================================
+    local function CreateIndicator()
+        if Vars.indicatorGui and Vars.indicatorGui.Parent then return Vars.indicatorGui end
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "TC_Indicator"
+        sg.ResetOnSpawn = false
+        sg.IgnoreGuiInset = true
+        sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+        sg.Parent = Vars.CoreGui
+
+        local frame = Instance.new("Frame")
+        frame.Name = "Indicator"
+        frame.Size = UDim2.new(0, 300, 0, 30)
+        frame.Position = UDim2.new(0.5, -150, 0, 80)
+        frame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+        frame.BackgroundTransparency = 0.35
+        frame.BorderSizePixel = 0
+        frame.Parent = sg
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 8)
+        corner.Parent = frame
+
+        local stroke = Instance.new("UIStroke")
+        stroke.Color = Color3.fromRGB(0, 200, 255)
+        stroke.Thickness = 1
+        stroke.Parent = frame
+
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(1, -10, 1, 0)
+        label.Position = UDim2.new(0, 5, 0, 0)
+        label.BackgroundTransparency = 1
+        label.Text = "TARGET: None"
+        label.TextColor3 = Color3.fromRGB(240, 240, 240)
+        label.TextSize = 13
+        label.Font = Enum.Font.Code
+        label.TextXAlignment = Enum.TextXAlignment.Center
+        label.Parent = frame
+
+        Vars.indicatorGui = sg
+        Vars.indicatorFrame = frame
+        Vars.indicatorLabel = label
+
+        if Settings.Advanced.Indicator_Draggable then
+            frame.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1
+                    or input.UserInputType == Enum.UserInputType.Touch then
+                    Vars.indicatorDragging = true
+                    Vars.indicatorDragStart = input.Position
+                    Vars.indicatorStartPos = frame.Position
+                end
+            end)
+            frame.InputChanged:Connect(function(input)
+                if Vars.indicatorDragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+                    or input.UserInputType == Enum.UserInputType.Touch) then
+                    local delta = input.Position - Vars.indicatorDragStart
+                    frame.Position = UDim2.new(
+                        Vars.indicatorStartPos.X.Scale, Vars.indicatorStartPos.X.Offset + delta.X,
+                        Vars.indicatorStartPos.Y.Scale, Vars.indicatorStartPos.Y.Offset + delta.Y
+                    )
+                end
+            end)
+            UserInputService.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1
+                    or input.UserInputType == Enum.UserInputType.Touch then
+                    Vars.indicatorDragging = false
+                end
+            end)
+        end
+        return sg
+    end
+
+    local function UpdateIndicator()
+        if not Settings.Advanced.Indicator_Enabled then
+            if Vars.indicatorGui then Vars.indicatorGui.Enabled = false end
+            return
+        end
+        if not Vars.indicatorGui then CreateIndicator() end
+        Vars.indicatorGui.Enabled = true
+        local target = nil
+        if Vars.TargetManager then
+            local t = Vars.TargetManager:GetCurrentTarget()
+            if t and t.player then target = t.player.Name end
+        end
+        local features = {}
+        if Settings.ESP.Enabled then table_insert(features, "ESP") end
+        if Settings.Aimbot.Enabled then table_insert(features, "AIM") end
+        if Settings.AimAssist.Enabled then table_insert(features, "AA") end
+        if Settings.WeaponMods.NoRecoil then table_insert(features, "NR") end
+        if Settings.Fun.RagebotEnabled then table_insert(features, "RAGE") end
+        if Settings.Fun.OrbitEnabled then table_insert(features, "ORB") end
+        if Settings.Fun.BlitzEnabled then table_insert(features, "BLITZ") end
+        if Settings.Sync.Enabled then table_insert(features, "SYNC") end
+        if Settings.Advanced.Desync_Enabled then table_insert(features, "DESYNC") end
+        local text = "TARGET: " .. (target or "None") .. "  |  " .. (#features > 0 and table.concat(features, "+") or "---")
+        Vars.indicatorLabel.Text = text
+        Vars.indicatorLabel.TextColor3 = target and Color3.fromRGB(255, 220, 0) or Color3.fromRGB(240, 240, 240)
+    end
+
+    Vars.indicatorConn = RunService.RenderStepped:Connect(function()
+        if Vars.isScriptUnloaded then return end
+        pcall(UpdateIndicator)
+    end)
+
+    -- ============================================================
+    -- 5. Camera Y Offset
+    -- ============================================================
+    Vars.camYConn = RunService.RenderStepped:Connect(function()
+        if Vars.isScriptUnloaded then return end
+        if not Settings.Advanced.CamY_Enabled then
+            if Vars.camYOriginal then
+                local cam = GetCamera()
+                if cam then cam.CFrame = Vars.camYOriginal end
+                Vars.camYOriginal = nil
+            end
+            return
+        end
+        local cam = GetCamera()
+        if not cam then return end
+        local offset = V3(0, Settings.Advanced.CamY_Offset, 0)
+        local pos = cam.CFrame.Position + offset
+        cam.CFrame = CFrame_new(pos, pos + cam.CFrame.LookVector)
+    end)
+
+    -- ============================================================
+    -- 6. CFrame View
+    -- ============================================================
+    Vars.cframeViewConn = RunService.RenderStepped:Connect(function()
+        if Vars.isScriptUnloaded then return end
+        if not Settings.Advanced.CFrameView_Enabled then return end
+        local char = LP.Character
+        if not char then return end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        local cam = GetCamera()
+        if not cam then return end
+        local offset = V3(0, 3, -12)
+        local newPos = root.CFrame:PointToWorldSpace(offset)
+        cam.CFrame = CFrame_new(newPos, root.Position + V3(0, 1, 0))
+    end)
+
+    -- ============================================================
+    -- 7. World Proximity
+    -- ============================================================
+    Vars.worldProximityConn = RunService.Heartbeat:Connect(function()
+        if Vars.isScriptUnloaded then return end
+        if not Settings.Advanced.WP_Enabled then return end
+        if Settings.Advanced.WP_MaxActivation <= 0 then return end
+        local count = 0
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if count >= Settings.Advanced.WP_MaxActivation then break end
+            if obj:IsA("ProximityPrompt") and obj.Enabled then
+                pcall(function()
+                    if Settings.Advanced.WP_HoldDuration > 0 then
+                        obj.HoldDuration = Settings.Advanced.WP_HoldDuration
+                    end
+                    if obj.MaxActivationDistance and Settings.Advanced.WP_MaxActivation > 0 then
+                        obj.MaxActivationDistance = Settings.Advanced.WP_MaxActivation
+                    end
+                    if fireproximityprompt then fireproximityprompt(obj) end
+                end)
+                count = count + 1
+            end
+        end
+    end)
+
+    -- ============================================================
+    -- 8. World Xray
+    -- ============================================================
+    local function ApplyWorldXray(state)
+        if state then
+            Vars.worldXrayParts = {}
+            for _, part in ipairs(Workspace:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    local skip = false
+                    for _, bl in ipairs(Settings.Advanced.WX_Blacklist) do
+                        if part:FindFirstChildOfClass(bl) or (part.Parent and part.Parent:FindFirstChildOfClass(bl)) then
+                            skip = true
+                            break
+                        end
+                    end
+                    if not skip then
+                        Vars.worldXrayParts[part] = part.Transparency
+                        pcall(function()
+                            part.Transparency = Settings.Advanced.WX_Transparency
+                        end)
+                    end
+                end
+            end
+            Vars.worldXrayActive = true
+        else
+            for part, orig in pairs(Vars.worldXrayParts) do
+                if part and part.Parent then
+                    pcall(function() part.Transparency = orig end)
+                end
+            end
+            Vars.worldXrayParts = {}
+            Vars.worldXrayActive = false
+        end
+    end
+    Vars.ApplyWorldXray = ApplyWorldXray
+
+    -- ============================================================
+    -- 9. Loop Fire
+    -- ============================================================
+    Vars.loopFireConn = RunService.Heartbeat:Connect(function()
+        if Vars.isScriptUnloaded then return end
+        if not Settings.Advanced.LF_Enabled then return end
+        local fireType = Settings.Advanced.LF_Type
+        local interval = math.max(Settings.Advanced.LF_Interval, 0.1)
+        local now = os_clock()
+        if Vars.loopFireLast and (now - Vars.loopFireLast) < interval then return end
+        Vars.loopFireLast = now
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if fireType == "TouchInterest" and obj:IsA("BasePart") then
+                local touch = obj:FindFirstChildOfClass("TouchTransmitter")
+                if touch and firetouchinterest and LP.Character then
+                    local hrp = LP.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp then
+                        pcall(function() firetouchinterest(hrp, obj, 0) end)
+                        pcall(function() firetouchinterest(hrp, obj, 1) end)
+                    end
+                end
+            elseif fireType == "ClickDetector" and obj:IsA("ClickDetector") then
+                if fireclickdetector then pcall(function() fireclickdetector(obj) end) end
+            elseif fireType == "ProximityPrompt" and obj:IsA("ProximityPrompt") then
+                if fireproximityprompt then pcall(function() fireproximityprompt(obj) end) end
+            end
+        end
+    end)
+
+    -- ============================================================
+    -- 10. Truss
+    -- ============================================================
+    local function ApplyTruss(state)
+        Settings.Advanced.Truss_Enabled = state
+        if state then
+            if Vars.trussPart then Vars.trussPart:Destroy() end
+            local truss = Instance.new("TrussPart")
+            truss.Transparency = 1
+            truss.Size = V3(2, 10, 2)
+            truss.CanCollide = true
+            truss.Name = "TC_Truss_" .. tostring(math.random(10000, 99999))
+            truss.Parent = Workspace
+            Vars.trussPart = truss
+        else
+            if Vars.trussPart then
+                pcall(function() Vars.trussPart:Destroy() end)
+                Vars.trussPart = nil
+            end
+        end
+    end
+    Vars.ApplyTruss = ApplyTruss
+
+    Vars.trussConn = RunService.Heartbeat:Connect(function()
+        if Vars.isScriptUnloaded then return end
+        if not Settings.Advanced.Truss_Enabled then return end
+        if not Vars.trussPart or not Vars.trussPart.Parent then return end
+        local char = LP.Character
+        if not char then return end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        Vars.trussPart.CFrame = root.CFrame * CFrame_new(0, 0, -1.5)
+    end)
+
+    -- ============================================================
+    -- 11. Airwalk
+    -- ============================================================
+    local function ApplyAirwalk(state)
+        Settings.Advanced.Airwalk_Enabled = state
+        if state then
+            if Vars.airwalkPart then Vars.airwalkPart:Destroy() end
+            local part = Instance.new("Part")
+            part.Transparency = 1
+            part.Size = V3(7, 2, 3)
+            part.Anchored = true
+            part.CanCollide = true
+            part.Name = "TC_Airwalk_" .. tostring(math.random(10000, 99999))
+            part.Parent = Workspace
+            Vars.airwalkPart = part
+        else
+            if Vars.airwalkPart then
+                pcall(function() Vars.airwalkPart:Destroy() end)
+                Vars.airwalkPart = nil
+            end
+        end
+    end
+    Vars.ApplyAirwalk = ApplyAirwalk
+
+    Vars.airwalkConn = RunService.Heartbeat:Connect(function()
+        if Vars.isScriptUnloaded then return end
+        if not Settings.Advanced.Airwalk_Enabled then return end
+        if not Vars.airwalkPart or not Vars.airwalkPart.Parent then return end
+        local char = LP.Character
+        if not char then return end
+        local root = char:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        Vars.airwalkPart.CFrame = root.CFrame + V3(0, -4, 0)
+    end)
+
+    -- ============================================================
+    -- 12. Autorespawn
+    -- ============================================================
+    local function ApplyAutorespawn(state)
+        Settings.Advanced.Autorespawn_Enabled = state
+        if state then
+            Vars.autorespawnDeathPos = nil
+            if Vars.autorespawnConns.died then Vars.autorespawnConns.died:Disconnect() end
+            if Vars.autorespawnConns.added then Vars.autorespawnConns.added:Disconnect() end
+
+            local function setupChar(char)
+                local hum = char:WaitForChild("Humanoid", 5)
+                local root = char:WaitForChild("HumanoidRootPart", 5)
+                if not hum or not root then return end
+                Vars.autorespawnConns.died = hum.Died:Connect(function()
+                    if Settings.Advanced.Autorespawn_Enabled then
+                        Vars.autorespawnDeathPos = root.CFrame
+                    end
+                end)
+            end
+            if LP.Character then setupChar(LP.Character) end
+            Vars.autorespawnConns.added = LP.CharacterAdded:Connect(function(char)
+                if not Settings.Advanced.Autorespawn_Enabled then return end
+                task.wait(0.3)
+                if Vars.autorespawnDeathPos then
+                    local root = char:WaitForChild("HumanoidRootPart", 5)
+                    if root then root.CFrame = Vars.autorespawnDeathPos end
+                    Vars.autorespawnDeathPos = nil
+                end
+                setupChar(char)
+            end)
+        else
+            for _, conn in pairs(Vars.autorespawnConns) do
+                pcall(function() conn:Disconnect() end)
+            end
+            Vars.autorespawnConns = {}
+            Vars.autorespawnDeathPos = nil
+        end
+    end
+    Vars.ApplyAutorespawn = ApplyAutorespawn
+
+    -- ============================================================
+    -- 13. Flight
+    -- ============================================================
+    local function ApplyFlight(state)
+        Settings.Advanced.Flight_Enabled = state
+        if state then
+            local char = LP.Character
+            if not char then return end
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            local root = char:FindFirstChild("HumanoidRootPart")
+            if not hum or not root then return end
+            hum.PlatformStand = true
+            if Vars.flightBodyGyro then Vars.flightBodyGyro:Destroy() end
+            if Vars.flightBodyVelocity then Vars.flightBodyVelocity:Destroy() end
+            local bg = Instance.new("BodyGyro")
+            bg.P = 9e4
+            bg.MaxTorque = V3(9e9, 9e9, 9e9)
+            bg.CFrame = root.CFrame
+            bg.Parent = root
+            Vars.flightBodyGyro = bg
+            local bv = Instance.new("BodyVelocity")
+            bv.Velocity = V3(0, 0, 0)
+            bv.MaxForce = V3(9e9, 9e9, 9e9)
+            bv.Parent = root
+            Vars.flightBodyVelocity = bv
+        else
+            if Vars.flightBodyGyro then
+                pcall(function() Vars.flightBodyGyro:Destroy() end)
+                Vars.flightBodyGyro = nil
+            end
+            if Vars.flightBodyVelocity then
+                pcall(function() Vars.flightBodyVelocity:Destroy() end)
+                Vars.flightBodyVelocity = nil
+            end
+            local char = LP.Character
+            if char then
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum then hum.PlatformStand = false end
+            end
+        end
+    end
+    Vars.ApplyFlight = ApplyFlight
+
+    Vars.flightConn = RunService.Heartbeat:Connect(function()
+        if Vars.isScriptUnloaded then return end
+        if not Settings.Advanced.Flight_Enabled then return end
+        if not Vars.flightBodyVelocity or not Vars.flightBodyGyro then return end
+        local cam = GetCamera()
+        if not cam then return end
+        local ctrl = Vars.exploitFlyControl
+        local spd = Settings.Advanced.Flight_Speed
+        local look = cam.CFrame.LookVector
+        local right = cam.CFrame.RightVector
+        local dir = look * (ctrl.F + ctrl.B) + right * (ctrl.R + ctrl.L)
+        local up = (ctrl.U + ctrl.D)
+        if dir.Magnitude > 0.01 then
+            Vars.flightBodyVelocity.Velocity = dir.Unit * spd + V3(0, up * spd, 0)
+        else
+            Vars.flightBodyVelocity.Velocity = V3(0, up * spd, 0)
+        end
+        Vars.flightBodyGyro.CFrame = cam.CFrame
+    end)
+
+    -- ============================================================
+    -- Cleanup Advanced
+    -- ============================================================
+    Vars.CleanupAdvanced = function()
+        pcall(function() if Vars.indicatorGui then Vars.indicatorGui:Destroy() end end)
+        pcall(function() if Vars.quickTogglesGui then Vars.quickTogglesGui:Destroy() end end)
+        pcall(ClearAllHitboxViz)
+        pcall(function() if Vars.trussPart then Vars.trussPart:Destroy() end end)
+        pcall(function() if Vars.airwalkPart then Vars.airwalkPart:Destroy() end end)
+        pcall(function() if Vars.flightBodyGyro then Vars.flightBodyGyro:Destroy() end end)
+        pcall(function() if Vars.flightBodyVelocity then Vars.flightBodyVelocity:Destroy() end end)
+        pcall(function() Vars.ApplyWorldXray(false) end)
+        pcall(function() ApplyAutorespawn(false) end)
+
+        pcall(function() Vars.indicatorConn:Disconnect() end)
+        pcall(function() Vars.camYConn:Disconnect() end)
+        pcall(function() Vars.cframeViewConn:Disconnect() end)
+        pcall(function() Vars.worldProximityConn:Disconnect() end)
+        pcall(function() Vars.loopFireConn:Disconnect() end)
+        pcall(function() Vars.trussConn:Disconnect() end)
+        pcall(function() Vars.airwalkConn:Disconnect() end)
+        pcall(function() Vars.flightConn:Disconnect() end)
+        pcall(function() Vars.qtConn:Disconnect() end)
+    end
+end
+
+-- ============================================================
+-- BLOQUE 8.8: SAVE/LOAD con Fuzzymatch
+-- ============================================================
+do
+    local HttpService = Vars.HttpService
+    local MarketplaceService = Vars.MarketplaceService
+    local Settings = Vars.Settings
+
+    local SAVE_FOLDER = Settings.Advanced.SaveFolder
+    local SAVE_EXT = Settings.Advanced.SaveExtension
+
+    local function SavePath(name)
+        return SAVE_FOLDER .. "/" .. name .. SAVE_EXT
+    end
+
+    local function EnsureFolder()
+        if type(makefolder) ~= "function" then return false end
+        if type(isfolder) == "function" and not isfolder(SAVE_FOLDER) then
+            pcall(makefolder, SAVE_FOLDER)
+        end
+        return true
+    end
+
+    local function ListSaves()
+        local saves = {}
+        if type(listfiles) ~= "function" or type(isfolder) ~= "function" then return saves end
+        if not isfolder(SAVE_FOLDER) then return saves end
+        for _, file in ipairs(listfiles(SAVE_FOLDER)) do
+            local name = file:match("([^/]+)" .. SAVE_EXT .. "$")
+            if name then table.insert(saves, name) end
+        end
+        return saves
+    end
+    Vars.ListSaves = ListSaves
+
+    local function levenshtein(a, b)
+        a, b = a:lower(), b:lower()
+        local la, lb = #a, #b
+        local m = {}
+        for i = 0, la do m[i] = { [0] = i } end
+        for j = 0, lb do m[0][j] = j end
+        for i = 1, la do
+            for j = 1, lb do
+                local cost = (a:sub(i, i) == b:sub(j, j)) and 0 or 1
+                m[i][j] = math.min(m[i-1][j] + 1, m[i][j-1] + 1, m[i-1][j-1] + cost)
+            end
+        end
+        return m[la][lb]
+    end
+
+    local function Fuzzymatch(input)
+        if not input or input == "" then return nil end
+        local saves = ListSaves()
+        if #saves == 0 then return nil end
+        local best, bestScore = nil, 0
+        for _, name in ipairs(saves) do
+            if name:lower() == input:lower() then return name end
+            local dist = levenshtein(input, name)
+            local maxLen = math.max(#input, #name)
+            local score = 1 - (dist / maxLen)
+            if score > bestScore then
+                bestScore = score
+                best = name
+            end
+        end
+        if bestScore >= 0.6 then return best end
+        return nil
+    end
+    Vars.Fuzzymatch = Fuzzymatch
+
+    local function GetGameAbbr()
+        local ok, info = pcall(function()
+            return MarketplaceService:GetProductInfo(game.PlaceId)
+        end)
+        if ok and info and info.Name then
+            local clean = info.Name:gsub("[^%w%s]", ""):gsub("%s+", " ")
+            local words = {}
+            for w in clean:gmatch("%S+") do
+                if #w > 1 then table.insert(words, w) end
+            end
+            if #words > 0 then
+                local abbr = ""
+                for i = 1, math.min(#words, 4) do
+                    abbr = abbr .. string.upper(words[i]:sub(1, 1))
+                end
+                if #abbr >= 4 then return abbr:sub(1, 4) end
+            end
+        end
+        return "GAME"
+    end
+
+    local function SerializeConfig()
+        local out = {}
+        for section, data in pairs(Settings) do
+            if type(data) == "table" then
+                out[section] = {}
+                for k, v in pairs(data) do
+                    if type(v) == "table" and v.R and v.G and v.B then
+                        out[section][k] = {__type = "Color3", R = v.R, G = v.G, B = v.B}
+                    elseif type(v) == "table" and v.X and v.Y then
+                        out[section][k] = {__type = "Vector2", X = v.X, Y = v.Y}
+                    elseif type(v) == "table" then
+                        out[section][k] = v
+                    else
+                        out[section][k] = v
+                    end
+                end
+            end
+        end
+        return out
+    end
+
+    local function DeserializeConfig(data)
+        if not data then return end
+        for section, tbl in pairs(data) do
+            if type(Settings[section]) == "table" then
+                for k, v in pairs(tbl) do
+                    if type(v) == "table" and v.__type == "Color3" then
+                        Settings[section][k] = Color3.new(v.R, v.G, v.B)
+                    elseif type(v) == "table" and v.__type == "Vector2" then
+                        Settings[section][k] = Vector2.new(v.X, v.Y)
+                    else
+                        Settings[section][k] = v
+                    end
+                end
+            end
+        end
+    end
+
+    function Vars.SaveConfig(name)
+        if not EnsureFolder() then return false end
+        if not name or name == "" then name = GetGameAbbr() end
+        local saves = ListSaves()
+        local finalName = name
+        for _, existing in ipairs(saves) do
+            if existing == finalName then
+                finalName = name .. "_" .. tostring(math.random(100, 999))
+                break
+            end
+        end
+        local data = { version = "1.0", timestamp = os.time(), config = SerializeConfig() }
+        local ok, encoded = pcall(function() return HttpService:JSONEncode(data) end)
+        if not ok then return false end
+        local ok2 = pcall(writefile, SavePath(finalName), encoded)
+        if ok2 then
+            Settings.Advanced.CurrentSave = finalName
+            Logger.Info("Guardado: " .. finalName)
+            return true
+        end
+        return false
+    end
+
+    function Vars.LoadConfig(name)
+        if not name or name == "" then return false end
+        local actual = Fuzzymatch(name)
+        if not actual then
+            Logger.Warn("Load: no se encontró " .. name)
+            return false
+        end
+        if type(readfile) ~= "function" then return false end
+        local ok, raw = pcall(readfile, SavePath(actual))
+        if not ok or not raw then return false end
+        local ok2, decoded = pcall(function() return HttpService:JSONDecode(raw) end)
+        if not ok2 or not decoded or not decoded.config then return false end
+        DeserializeConfig(decoded.config)
+        Settings.Advanced.CurrentSave = actual
+        Logger.Info("Cargado: " .. actual)
+        return true
+    end
+
+    function Vars.DeleteConfig(name)
+        if not name or name == "" then return false end
+        local actual = Fuzzymatch(name) or name
+        if type(delfile) ~= "function" then return false end
+        return pcall(delfile, SavePath(actual))
+    end
+end
+
+-- ============================================================
+-- BLOQUE 8.9: QUICK TOGGLES
+-- ============================================================
+do
+    local UserInputService = Vars.UserInputService
+    local RunService = Vars.RunService
+    local Settings = Vars.Settings
+
+    local QuickTogglesList = {
+        {name = "ESP",       get = function() return Settings.ESP.Enabled end,           set = function(v) Settings.ESP.Enabled = v end},
+        {name = "Aimbot",    get = function() return Settings.Aimbot.Enabled end,        set = function(v) Settings.Aimbot.Enabled = v end},
+        {name = "AimAssist", get = function() return Settings.AimAssist.Enabled end,     set = function(v) Settings.AimAssist.Enabled = v end},
+        {name = "NoRecoil",  get = function() return Settings.WeaponMods.NoRecoil end,   set = function(v) Settings.WeaponMods.NoRecoil = v end},
+        {name = "Ragebot",   get = function() return Settings.Fun.RagebotEnabled end,    set = function(v) Settings.Fun.RagebotEnabled = v end},
+        {name = "Orbit",     get = function() return Settings.Fun.OrbitEnabled end,      set = function(v) Settings.Fun.OrbitEnabled = v end},
+        {name = "Blitz",     get = function() return Settings.Fun.BlitzEnabled end,      set = function(v) Settings.Fun.BlitzEnabled = v end},
+        {name = "AntiKick",  get = function() return Settings.Advanced.AntiKick end,     set = function(v) Vars.ApplyAntiKick(v) end},
+        {name = "Sync",      get = function() return Settings.Sync.Enabled end,          set = function(v)
+            Settings.Sync.Enabled = v
+            if v then Vars.StartSyncBooster() else Vars.StopSyncBooster() end
+        end},
+        {name = "Desync",    get = function() return Settings.Advanced.Desync_Enabled end, set = function(v)
+            Settings.Advanced.Desync_Enabled = v
+            if v then Vars.StartDesync() else Vars.StopDesync() end
+        end},
+        {name = "Flight",    get = function() return Settings.Advanced.Flight_Enabled end, set = function(v) Vars.ApplyFlight(v) end},
+    }
+
+    local function CreateQuickToggles()
+        if Vars.quickTogglesGui and Vars.quickTogglesGui.Parent then
+            Vars.quickTogglesGui:Destroy()
+        end
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "TC_QuickToggles"
+        sg.ResetOnSpawn = false
+        sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+        sg.Parent = Vars.CoreGui
+
+        local main = Instance.new("Frame")
+        main.Size = UDim2.new(0, 100, 0, #QuickTogglesList * 26 + 10)
+        main.Position = UDim2.new(0, 10, 0.5, -140)
+        main.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+        main.BackgroundTransparency = 0.4
+        main.BorderSizePixel = 0
+        main.Parent = sg
+
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0, 8)
+        corner.Parent = main
+
+        local layout = Instance.new("UIListLayout")
+        layout.Padding = UDim.new(0, 4)
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        layout.VerticalAlignment = Enum.VerticalAlignment.Center
+        layout.Parent = main
+
+        for i, item in ipairs(QuickTogglesList) do
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(0, 90, 0, 22)
+            btn.BackgroundColor3 = item.get() and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(180, 0, 0)
+            btn.Text = item.name
+            btn.TextColor3 = Color3.new(1, 1, 1)
+            btn.TextSize = 12
+            btn.Font = Enum.Font.Code
+            btn.BorderSizePixel = 0
+            btn.LayoutOrder = i
+            btn.Parent = main
+
+            local c2 = Instance.new("UICorner")
+            c2.CornerRadius = UDim.new(0, 4)
+            c2.Parent = btn
+
+            btn.MouseButton1Click:Connect(function()
+                local newState = not item.get()
+                item.set(newState)
+                btn.BackgroundColor3 = newState and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(180, 0, 0)
+            end)
+
+            task.spawn(function()
+                while btn.Parent and not Vars.isScriptUnloaded do
+                    local cur = item.get()
+                    local expected = cur and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(180, 0, 0)
+                    if btn.BackgroundColor3 ~= expected then
+                        btn.BackgroundColor3 = expected
+                    end
+                    task.wait(0.3)
+                end
+            end)
+        end
+
+        if Settings.Advanced.QT_Draggable then
+            local dragging, dragStart, startPos
+            main.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1
+                    or input.UserInputType == Enum.UserInputType.Touch then
+                    dragging = true
+                    dragStart = input.Position
+                    startPos = main.Position
+                end
+            end)
+            main.InputChanged:Connect(function(input)
+                if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+                    or input.UserInputType == Enum.UserInputType.Touch) then
+                    local delta = input.Position - dragStart
+                    main.Position = UDim2.new(
+                        startPos.X.Scale, startPos.X.Offset + delta.X,
+                        startPos.Y.Scale, startPos.Y.Offset + delta.Y
+                    )
+                end
+            end)
+            UserInputService.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1
+                    or input.UserInputType == Enum.UserInputType.Touch then
+                    dragging = false
+                end
+            end)
+        end
+
+        Vars.quickTogglesGui = sg
+    end
+
+    Vars.qtConn = RunService.Heartbeat:Connect(function()
+        if Vars.isScriptUnloaded then return end
+        if not Settings.Advanced.QT_Enabled then
+            if Vars.quickTogglesGui and Vars.quickTogglesGui.Enabled then
+                Vars.quickTogglesGui.Enabled = false
+            end
+            return
+        end
+        if not Vars.quickTogglesGui or not Vars.quickTogglesGui.Parent then
+            CreateQuickToggles()
+        elseif not Vars.quickTogglesGui.Enabled then
+            Vars.quickTogglesGui.Enabled = true
+        end
+    end)
+end
+
+-- ============================================================
+-- BLOQUE 9: UI (Scryux)
 -- ============================================================
 do
     local Settings = Vars.Settings
-    local table_insert = Vars.table_insert
     local UserInputService = Vars.UserInputService
+    local table_insert = Vars.table_insert
 
-    -- ============================================================
-    -- Ventana principal (mejorada visualmente)
-    -- ============================================================
     local Window = ScryuxUI:CreateWindow({
-        Title = "Town Complete v9.8.3",
-        Size = UDim2.new(0, 780, 0, 660),
+        Title = "Town Complete v9.9.0",
+        Size = UDim2.new(0, 800, 0, 680),
         Keybind = Settings.Hotkeys.ToggleMenu,
-        Theme = "Dark",           -- Tema oscuro estilo Bloxstrap
-        Acrylic = true,           -- Blur si está soportado
+        Theme = "Dark",
+        Acrylic = true,
         SaveFolder = "TownComplete_Settings/" .. tostring(game.PlaceId),
         FloatingIcon = true,
-        -- Propiedades extendidas (ignoradas si no están soportadas)
-        SearchBar = false,        -- Desactivar search
-        ShowSearch = false,       -- Alternativa
-        Draggable = true,         -- Permitir arrastrar
-        Resizable = true,         -- Permitir redimensionar
-        CornerRadius = 8,         -- Bordes redondeados
-        Shadow = true,            -- Sombra
-        Transparency = 0.95,      -- Transparencia
+        SearchBar = false,
+        ShowSearch = false,
+        Draggable = true,
+        Resizable = true,
+        CornerRadius = 8,
+        Shadow = true,
+        Transparency = 0.95,
     })
     _env.TownUI_Window = Window
     Vars.Window = Window
 
-    -- Helper: Botón cíclico para opciones tipo dropdown
-    local function CreateCycleButton(section, text, options, getCurrent, setCurrent, index)
-        if not section or not section.CreateButton then return end
-        local buttonText = text .. ": " .. tostring(getCurrent())
-        section:CreateButton(buttonText, function()
-            local current = tostring(getCurrent())
-            local idx = 1
-            for i, v in ipairs(options) do
-                if tostring(v) == current then idx = i; break end
-            end
-            idx = idx % #options + 1
-            setCurrent(options[idx])
-            if Window.Notify then
-                pcall(function()
-                    Window:Notify("Aimbot", text .. ": " .. tostring(options[idx]), 1.5, "Info")
-                end)
-            end
-        end)
-    end
-
     -- ============================================================
-    -- TAB: ESP
+    -- ESP Tab
     -- ============================================================
     local ESPTab = Window:CreateTab("ESP")
     local ESPMain = ESPTab:CreateSection("ESP")
@@ -3635,7 +5116,7 @@ do
         Callback = function(c) Settings.ESP.HeadDotColor = c end })
     ESPInfo:CreateSlider({ Text = "Head Dot Radius", Min = 1, Max = 15, Default = 5, Index = "ESP_HeadDotRadius",
         Callback = function(v) Settings.ESP.HeadDotRadius = v end })
-    ESPInfo:CreateToggle({ Text = "Items (armas tiradas)", Default = false, Index = "ESP_Items",
+    ESPInfo:CreateToggle({ Text = "Items", Default = false, Index = "ESP_Items",
         Callback = function(v)
             Settings.ESP.Items = v
             if v then
@@ -3650,7 +5131,7 @@ do
         Callback = function(c) Settings.ESP.ItemColor = c end })
     ESPInfo:CreateSlider({ Text = "Item Max Distance", Min = 50, Max = 2000, Default = 500, Index = "ESP_ItemMaxDist",
         Callback = function(v) Settings.ESP.ItemMaxDistance = v end })
-    ESPInfo:CreateToggle({ Text = "Weapons (arma del enemigo)", Default = false, Index = "ESP_Weapons",
+    ESPInfo:CreateToggle({ Text = "Weapons", Default = false, Index = "ESP_Weapons",
         Callback = function(v)
             Settings.ESP.Weapons = v
             if not v then
@@ -3661,6 +5142,8 @@ do
         end })
     ESPInfo:CreateColorpicker({ Text = "Weapon Color", Default = Color3.fromRGB(255, 0, 255), Index = "ESP_WeaponColor",
         Callback = function(c) Settings.ESP.WeaponColor = c end })
+    ESPInfo:CreateToggle({ Text = "ESP Color By Health", Default = false, Index = "ESP_ColorByHealth",
+        Callback = function(v) Settings.ESP.ColorByHealth = v end })
 
     local ESPChams = ESPTab:CreateSection("Chams")
     ESPChams:CreateToggle({ Text = "Chams", Default = true, Index = "ESP_Chams",
@@ -3678,11 +5161,11 @@ do
         Callback = function(v) Settings.ESP.ChamsDepthMode = v end })
     ESPChams:CreateColorpicker({ Text = "Chams Outline Color", Default = Color3.new(1, 1, 1), Index = "ESP_ChamsOutlineColor",
         Callback = function(c) Settings.ESP.ChamsOutlineColor = c end })
-    ESPChams:CreateToggle({ Text = "Wallcheck Chams ESP", Default = false, Index = "ESP_WallcheckChams",
+    ESPChams:CreateToggle({ Text = "Wallcheck Chams", Default = false, Index = "ESP_WallcheckChams",
         Callback = function(v) Settings.ESP.WallcheckChams = v end })
 
     -- ============================================================
-    -- TAB: Skeleton
+    -- Skeleton Tab
     -- ============================================================
     local SkeletonTab = Window:CreateTab("Skeleton")
     local SkelMain = SkeletonTab:CreateSection("Skeleton ESP")
@@ -3700,7 +5183,7 @@ do
         end })
     SkelMain:CreateSlider({ Text = "Max Distance", Min = 50, Max = 2000, Default = 500, Index = "Skel_MaxDist",
         Callback = function(v) Settings.Skeleton.MaxDistance = v end })
-    SkelMain:CreateDropdown({ Text = "Rig Mode", Options = {"Auto", "R6", "R15", "Both"}, Default = "Auto", Index = "Skel_RigMode",
+    SkelMain:CreateDropdown({ Text = "Rig Mode", Options = {"Auto", "R6", "R15"}, Default = "Auto", Index = "Skel_RigMode",
         Callback = function(v)
             Settings.Skeleton.RigMode = v
             Vars.ClearAllSkeletons()
@@ -3709,7 +5192,7 @@ do
         Callback = function(v) Settings.Skeleton.OnlyVisible = v end })
 
     -- ============================================================
-    -- TAB: Aimbot
+    -- Aimbot Tab
     -- ============================================================
     local AimbotTab = Window:CreateTab("Aimbot")
     local ASet = AimbotTab:CreateSection("Aimbot")
@@ -3727,32 +5210,20 @@ do
         Callback = function(v) Settings.Aimbot.TeamCheck = v end })
     ASet:CreateToggle({ Text = "Ignore Passive", Default = true, Index = "Aim_IgnorePassive",
         Callback = function(v) Settings.Aimbot.IgnorePassive = v end })
-    ASet:CreateToggle({ Text = "Require Gun Equipped", Default = true, Index = "Aim_RequireGun",
+    ASet:CreateToggle({ Text = "Require Gun", Default = true, Index = "Aim_RequireGun",
         Callback = function(v) Settings.Aimbot.RequireGun = v end })
     ASet:CreateSlider({ Text = "Max Distance", Min = 50, Max = 2000, Default = 500, Index = "Aim_MaxDist",
         Callback = function(v) Settings.Aimbot.MaxDistance = v end })
-
-    -- ✅ FIX: Botón cíclico para Aim Key Type (dropdown no funcionaba)
-    CreateCycleButton(ASet, "Aim Key Type", {"Mouse", "Key"}, function()
-        return Settings.Aimbot.AimKeyType
-    end, function(v)
-        Settings.Aimbot.AimKeyType = v
-    end, "Aim_KeyType")
-
+    ASet:CreateDropdown({ Text = "Aim Key Type", Options = {"Mouse","Key"}, Default = "Mouse", Index = "Aim_KeyType",
+        Callback = function(v) Settings.Aimbot.AimKeyType = v end })
     ASet:CreateDropdown({ Text = "Aim Key", Options = {"T","Q","E","R","F","G","Z","X","C","V"}, Default = "T", Index = "Aim_Key",
         Callback = function(v) if Enum.KeyCode[v] then Settings.Aimbot.AimKey = Enum.KeyCode[v] end end })
-
-    -- ✅ FIX: Botón cíclico para Mouse Button
-    CreateCycleButton(ASet, "Mouse Button", {"Right", "Left", "Middle"}, function()
-        if Settings.Aimbot.AimMouseButton == Enum.UserInputType.MouseButton1 then return "Left"
-        elseif Settings.Aimbot.AimMouseButton == Enum.UserInputType.MouseButton2 then return "Right"
-        else return "Middle" end
-    end, function(v)
-        if v == "Left" then Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton1
-        elseif v == "Right" then Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton2
-        else Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton3 end
-    end, "Aim_MouseBtn")
-
+    ASet:CreateDropdown({ Text = "Mouse Button", Options = {"Left","Right","Middle"}, Default = "Right", Index = "Aim_MouseBtn",
+        Callback = function(v)
+            if v == "Left" then Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton1
+            elseif v == "Right" then Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton2
+            else Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton3 end
+        end })
     ASet:CreateSlider({ Text = "FOV", Min = 1, Max = 360, Default = 180, Index = "Aim_FOV",
         Callback = function(v) Settings.Aimbot.FOV = v end })
     ASet:CreateToggle({ Text = "Show FOV Circle", Default = false, Index = "Aim_ShowFOV",
@@ -3818,7 +5289,7 @@ do
     end)
 
     -- ============================================================
-    -- TAB: Aim Assist
+    -- Aim Assist Tab
     -- ============================================================
     local AimAssistTab = Window:CreateTab("Aim Assist")
     local AASet = AimAssistTab:CreateSection("Aim Assist")
@@ -3833,8 +5304,6 @@ do
         Callback = function(v) Settings.AimAssist.ShowFOV = v end })
     AASet:CreateColorpicker({ Text = "FOV Color", Default = Color3.fromRGB(0, 255, 255), Index = "AA_FOVColor",
         Callback = function(c) Settings.AimAssist.FOVColor = c end })
-    AASet:CreateSlider({ Text = "FOV Thickness", Min = 1, Max = 5, Default = 1, Index = "AA_FOVThickness",
-        Callback = function(v) Settings.AimAssist.FOVThickness = v end })
     AASet:CreateSlider({ Text = "Max Distance", Min = 50, Max = 2000, Default = 500, Index = "AA_MaxDist",
         Callback = function(v) Settings.AimAssist.MaxDistance = v end })
     AASet:CreateSlider({ Text = "Smoothness", Min = 0, Max = 100, Default = 30, Index = "AA_Smoothness",
@@ -3843,27 +5312,17 @@ do
         Callback = function(v) Settings.AimAssist.AimPart = v end })
     AASet:CreateToggle({ Text = "Use Selective FOV", Default = false, Index = "AA_Selective",
         Callback = function(v) Settings.AimAssist.Selective = v end })
-    AASet:CreateDropdown({ Text = "Priority", Options = {"Distance", "FOV"}, Default = "Distance", Index = "AA_Priority",
-        Callback = function(v) Settings.AimAssist.Priority = v end })
-    AASet:CreateDropdown({ Text = "Method", Options = {"Camera", "Mouse"}, Default = "Camera", Index = "AA_Method",
-        Callback = function(v) Settings.AimAssist.UseMouse = (v == "Mouse") end })
     AASet:CreateToggle({ Text = "Team Check", Default = false, Index = "AA_TeamCheck",
         Callback = function(v) Settings.AimAssist.TeamCheck = v end })
     AASet:CreateToggle({ Text = "Ignore Passive", Default = true, Index = "AA_IgnorePassive",
         Callback = function(v) Settings.AimAssist.IgnorePassive = v end })
     AASet:CreateToggle({ Text = "Wall Check", Default = false, Index = "AA_WallCheck",
         Callback = function(v) Settings.AimAssist.WallCheck = v end })
-    AASet:CreateToggle({ Text = "Require Visible", Default = true, Index = "AA_Visible",
-        Callback = function(v) Settings.AimAssist.Visible = v end })
-    AASet:CreateToggle({ Text = "Use Prediction", Default = false, Index = "AA_Prediction",
-        Callback = function(v) Settings.AimAssist.UsePrediction = v end })
-    AASet:CreateSlider({ Text = "Prediction Amount", Min = 0.01, Max = 0.3, Default = 0.13, Index = "AA_PredAmount",
-        Callback = function(v) Settings.AimAssist.PredictionAmount = v end })
-    AASet:CreateToggle({ Text = "Use Ping Prediction", Default = false, Index = "AA_PingPrediction",
-        Callback = function(v) Settings.AimAssist.UsePingPrediction = v end })
+    AASet:CreateDropdown({ Text = "Method", Options = {"Camera", "Mouse"}, Default = "Camera", Index = "AA_Method",
+        Callback = function(v) Settings.AimAssist.UseMouse = (v == "Mouse") end })
 
     -- ============================================================
-    -- TAB: Weapon Mods
+    -- Weapon Mods
     -- ============================================================
     local WeaponTab = Window:CreateTab("Weapon Mods")
     local WS = WeaponTab:CreateSection("Weapon")
@@ -3874,7 +5333,7 @@ do
         end })
 
     -- ============================================================
-    -- TAB: Visuals
+    -- Visuals Tab
     -- ============================================================
     local VisualsTab = Window:CreateTab("Visuals")
     local VLight = VisualsTab:CreateSection("Lighting")
@@ -3893,7 +5352,7 @@ do
         Callback = function(v) Vars.setNoSunRays(v) end })
     VLight:CreateButton("Reset All Visuals", function()
         if Vars.ResetAllVisuals then Vars.ResetAllVisuals() end
-        if Window.Notify then Window:Notify("Visuals", "Reset aplicado", 2, "Success") end
+        if Window.Notify then Window:Notify("Visuals", "Reset", 2, "Success") end
     end)
 
     local VFOV = VisualsTab:CreateSection("Camera")
@@ -3906,11 +5365,11 @@ do
         end })
 
     local VHide = VisualsTab:CreateSection("First Person")
-    VHide:CreateToggle({ Text = "Hide Body in First Person", Default = false, Index = "Vis_HideBody",
+    VHide:CreateToggle({ Text = "Hide Body", Default = false, Index = "Vis_HideBody",
         Callback = function(v) Settings.Visuals.HideBody = v end })
-    VHide:CreateToggle({ Text = "Also Hide Hands/Arms", Default = false, Index = "Vis_HideHands",
+    VHide:CreateToggle({ Text = "Hide Hands/Arms", Default = false, Index = "Vis_HideHands",
         Callback = function(v) Settings.Visuals.HideHands = v end })
-    VHide:CreateToggle({ Text = "Also Hide Equipped Tool", Default = false, Index = "Vis_HideTool",
+    VHide:CreateToggle({ Text = "Hide Tool", Default = false, Index = "Vis_HideTool",
         Callback = function(v) Settings.Visuals.HideTool = v end })
 
     local VTracer = VisualsTab:CreateSection("Bullet Tracers")
@@ -3945,20 +5404,210 @@ do
         Callback = function(v) Settings.Visuals.CrosshairGap = v end })
 
     -- ============================================================
-    -- TAB: Backtrack
+    -- Fun Tab
+    -- ============================================================
+    local FunTab = Window:CreateTab("Fun")
+
+    local RageSet = FunTab:CreateSection("Ragebot")
+    RageSet:CreateToggle({ Text = "Ragebot Master", Default = false, Index = "Fun_Ragebot",
+        Callback = function(v)
+            Settings.Fun.RagebotEnabled = v
+            if Window.Notify then Window:Notify("Fun", "Ragebot: " .. tostring(v), 1.5, "Info") end
+        end })
+    RageSet:CreateSlider({ Text = "Fire Rate (s)", Min = 0.01, Max = 0.5, Default = 0.05, Index = "Fun_RageFireRate",
+        Callback = function(v) Settings.Fun.RagebotFireRate = v end })
+    RageSet:CreateSlider({ Text = "Max Distance", Min = 50, Max = 2000, Default = 500, Index = "Fun_RageMaxDist",
+        Callback = function(v) Settings.Fun.RagebotMaxDistance = v end })
+    RageSet:CreateSlider({ Text = "FOV", Min = 10, Max = 360, Default = 360, Index = "Fun_RageFOV",
+        Callback = function(v) Settings.Fun.RagebotFOV = v end })
+    RageSet:CreateDropdown({ Text = "Aim Part", Options = {"Head", "UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart"}, Default = "Head", Index = "Fun_RageAimPart",
+        Callback = function(v) Settings.Fun.RagebotAimPart = v end })
+    RageSet:CreateToggle({ Text = "Team Check", Default = true, Index = "Fun_RageTeamCheck",
+        Callback = function(v) Settings.Fun.RagebotTeamCheck = v end })
+    RageSet:CreateToggle({ Text = "Silent Aim (no rota cámara)", Default = true, Index = "Fun_RageSilent",
+        Callback = function(v) Settings.Fun.RagebotSilentAim = v end })
+
+    local OrbitSet = FunTab:CreateSection("Orbit")
+    OrbitSet:CreateToggle({ Text = "Orbit Master", Default = false, Index = "Fun_Orbit",
+        Callback = function(v)
+            Settings.Fun.OrbitEnabled = v
+            Vars.orbitAngle = 0
+            if Window.Notify then Window:Notify("Fun", "Orbit: " .. tostring(v), 1.5, "Info") end
+        end })
+    OrbitSet:CreateSlider({ Text = "Orbit Speed (rad/s)", Min = 0.5, Max = 15, Default = 3, Index = "Fun_OrbitSpeed",
+        Callback = function(v) Settings.Fun.OrbitSpeed = v end })
+    OrbitSet:CreateSlider({ Text = "Orbit Radius", Min = 2, Max = 30, Default = 8, Index = "Fun_OrbitRadius",
+        Callback = function(v) Settings.Fun.OrbitRadius = v end })
+    OrbitSet:CreateSlider({ Text = "Orbit Height", Min = -5, Max = 15, Default = 2, Index = "Fun_OrbitHeight",
+        Callback = function(v) Settings.Fun.OrbitHeight = v end })
+
+    local RageOrbitSet = FunTab:CreateSection("Ragebot + Orbit")
+    RageOrbitSet:CreateToggle({ Text = "Ragebot + Orbit Master", Default = false, Index = "Fun_RageOrbit",
+        Callback = function(v)
+            Settings.Fun.RagebotOrbitEnabled = v
+            Vars.orbitAngle = 0
+            if Window.Notify then Window:Notify("Fun", "Ragebot+Orbit: " .. tostring(v), 1.5, "Info") end
+        end })
+    RageOrbitSet:CreateSlider({ Text = "Orbit Speed", Min = 0.5, Max = 15, Default = 3, Index = "Fun_RageOrbitSpeed",
+        Callback = function(v) Settings.Fun.RagebotOrbitSpeed = v end })
+    RageOrbitSet:CreateSlider({ Text = "Orbit Radius", Min = 2, Max = 30, Default = 8, Index = "Fun_RageOrbitRadius",
+        Callback = function(v) Settings.Fun.RagebotOrbitRadius = v end })
+
+    local BlitzSet = FunTab:CreateSection("Ragebot Global (Blitz)")
+    BlitzSet:CreateToggle({ Text = "Blitz Master", Default = false, Index = "Fun_Blitz",
+        Callback = function(v)
+            Settings.Fun.BlitzEnabled = v
+            Vars.blitzKilledPlayers = {}
+            if Window.Notify then Window:Notify("Fun", "Blitz: " .. tostring(v), 2, "Warning") end
+        end })
+    BlitzSet:CreateSlider({ Text = "Blitz Speed", Min = 100, Max = 1000, Default = 1000, Index = "Fun_BlitzSpeed",
+        Callback = function(v) Settings.Fun.BlitzSpeed = v end })
+    BlitzSet:CreateSlider({ Text = "Fire Rate (s)", Min = 0.005, Max = 0.1, Default = 0.01, Index = "Fun_BlitzFireRate",
+        Callback = function(v) Settings.Fun.BlitzFireRate = v end })
+    BlitzSet:CreateSlider({ Text = "Teleport Range", Min = 500, Max = 10000, Default = 5000, Index = "Fun_BlitzRange",
+        Callback = function(v) Settings.Fun.BlitzTeleportRange = v end })
+
+    -- ============================================================
+    -- Advanced Tab (Gravel.cc integration)
+    -- ============================================================
+    local AdvancedTab = Window:CreateTab("Advanced")
+
+    -- AntiKick
+    local AntiKickSet = AdvancedTab:CreateSection("AntiKick")
+    AntiKickSet:CreateToggle({ Text = "AntiKick (block kicks)", Default = true, Index = "Adv_AntiKick",
+        Callback = function(v) Vars.ApplyAntiKick(v) end })
+
+    -- Hitbox Advanced
+    local HBSet = AdvancedTab:CreateSection("Hitbox Advanced")
+    HBSet:CreateSlider({ Text = "Hit Chance %", Min = 0, Max = 100, Default = 100, Index = "Adv_HitChance",
+        Callback = function(v) Settings.Advanced.HitChance = math.floor(v) end })
+    HBSet:CreateSlider({ Text = "Headshot Chance %", Min = 0, Max = 100, Default = 100, Index = "Adv_HeadshotChance",
+        Callback = function(v) Settings.Advanced.HeadshotChance = math.floor(v) end })
+    HBSet:CreateSlider({ Text = "STS Distance", Min = 0, Max = 50, Default = 5, Index = "Adv_STS",
+        Callback = function(v) Settings.Advanced.STS_Distance = v end })
+    HBSet:CreateToggle({ Text = "Scale To Screen", Default = false, Index = "Adv_ScaleToScreen",
+        Callback = function(v) Settings.Advanced.ScaleToScreen = v end })
+    HBSet:CreateSlider({ Text = "Max Expansion", Min = 1, Max = 30, Default = 8, Index = "Adv_MaxExpansion",
+        Callback = function(v) Settings.Advanced.MaxExpansion = v end })
+
+    -- Hitbox Visualizer
+    local VizSet = AdvancedTab:CreateSection("Hitbox Visualizer")
+    VizSet:CreateToggle({ Text = "Enable Hitbox Visualizer", Default = false, Index = "Adv_HitboxViz",
+        Callback = function(v)
+            Settings.Advanced.HitboxViz_Enabled = v
+            if not v then Vars.ClearAllHitboxViz() end
+        end })
+    VizSet:CreateDropdown({ Text = "Shape", Options = {"Block", "Sphere", "Cylinder"}, Default = "Block", Index = "Adv_VizShape",
+        Callback = function(v) Settings.Advanced.HitboxViz_Shape = v end })
+    VizSet:CreateDropdown({ Text = "Material", Options = {"Neon", "ForceField", "Glass", "Plastic", "Metal", "DiamondPlate"}, Default = "Neon", Index = "Adv_VizMat",
+        Callback = function(v) Settings.Advanced.HitboxViz_Material = v end })
+    VizSet:CreateSlider({ Text = "Transparency", Min = 0, Max = 1, Default = 0.6, Index = "Adv_VizTrans",
+        Callback = function(v) Settings.Advanced.HitboxViz_Transparency = v end })
+    VizSet:CreateColorpicker({ Text = "Color", Default = Color3.fromRGB(255, 0, 0), Index = "Adv_VizColor",
+        Callback = function(c) Settings.Advanced.HitboxViz_Color = c end })
+    VizSet:CreateSlider({ Text = "Gap", Min = 0, Max = 3, Default = 0.4, Index = "Adv_VizGap",
+        Callback = function(v) Settings.Advanced.HitboxViz_Gap = v end })
+
+    -- Indicator
+    local IndSet = AdvancedTab:CreateSection("Indicator UI")
+    IndSet:CreateToggle({ Text = "Enable Indicator", Default = false, Index = "Adv_Indicator",
+        Callback = function(v) Settings.Advanced.Indicator_Enabled = v end })
+    IndSet:CreateToggle({ Text = "Draggable", Default = true, Index = "Adv_IndicatorDrag",
+        Callback = function(v) Settings.Advanced.Indicator_Draggable = v end })
+
+    -- Quick Toggles
+    local QTSet = AdvancedTab:CreateSection("Quick Toggles")
+    QTSet:CreateToggle({ Text = "Enable Quick Toggles", Default = false, Index = "Adv_QT",
+        Callback = function(v) Settings.Advanced.QT_Enabled = v end })
+    QTSet:CreateToggle({ Text = "Draggable", Default = true, Index = "Adv_QTDrag",
+        Callback = function(v) Settings.Advanced.QT_Draggable = v end })
+
+    -- Camera
+    local CamSet = AdvancedTab:CreateSection("Camera")
+    CamSet:CreateToggle({ Text = "Camera Y Offset", Default = false, Index = "Adv_CamY",
+        Callback = function(v) Settings.Advanced.CamY_Enabled = v end })
+    CamSet:CreateSlider({ Text = "Y Offset", Min = -20, Max = 20, Default = 0, Index = "Adv_CamYOffset",
+        Callback = function(v) Settings.Advanced.CamY_Offset = v end })
+    CamSet:CreateToggle({ Text = "CFrame View", Default = false, Index = "Adv_CFrameView",
+        Callback = function(v) Settings.Advanced.CFrameView_Enabled = v end })
+
+    -- World
+    local WorldSet = AdvancedTab:CreateSection("World")
+    WorldSet:CreateToggle({ Text = "World Proximity (auto Prompts)", Default = false, Index = "Adv_WP",
+        Callback = function(v) Settings.Advanced.WP_Enabled = v end })
+    WorldSet:CreateSlider({ Text = "WP Max Activation", Min = 0, Max = 500, Default = 100, Index = "Adv_WPMax",
+        Callback = function(v) Settings.Advanced.WP_MaxActivation = math.floor(v) end })
+    WorldSet:CreateToggle({ Text = "World Xray", Default = false, Index = "Adv_WX",
+        Callback = function(v)
+            Settings.Advanced.WX_Enabled = v
+            Vars.ApplyWorldXray(v)
+        end })
+    WorldSet:CreateSlider({ Text = "Xray Transparency", Min = 0, Max = 1, Default = 0.5, Index = "Adv_WXTrans",
+        Callback = function(v)
+            Settings.Advanced.WX_Transparency = v
+            if Settings.Advanced.WX_Enabled then
+                Vars.ApplyWorldXray(false)
+                Vars.ApplyWorldXray(true)
+            end
+        end })
+    WorldSet:CreateToggle({ Text = "Loop Fire", Default = false, Index = "Adv_LF",
+        Callback = function(v) Settings.Advanced.LF_Enabled = v end })
+    WorldSet:CreateDropdown({ Text = "Fire Type", Options = {"TouchInterest", "ClickDetector", "ProximityPrompt"}, Default = "TouchInterest", Index = "Adv_LFType",
+        Callback = function(v) Settings.Advanced.LF_Type = v end })
+    WorldSet:CreateSlider({ Text = "Fire Interval (s)", Min = 0.1, Max = 10, Default = 1, Index = "Adv_LFInterval",
+        Callback = function(v) Settings.Advanced.LF_Interval = v end })
+
+    -- Movement Extras
+    local MoveSet = AdvancedTab:CreateSection("Movement Extras")
+    MoveSet:CreateToggle({ Text = "Truss", Default = false, Index = "Adv_Truss",
+        Callback = function(v) Vars.ApplyTruss(v) end })
+    MoveSet:CreateToggle({ Text = "Airwalk", Default = false, Index = "Adv_Airwalk",
+        Callback = function(v) Vars.ApplyAirwalk(v) end })
+    MoveSet:CreateToggle({ Text = "Autorespawn", Default = false, Index = "Adv_Autorespawn",
+        Callback = function(v) Vars.ApplyAutorespawn(v) end })
+    MoveSet:CreateToggle({ Text = "Flight", Default = false, Index = "Adv_Flight",
+        Callback = function(v) Vars.ApplyFlight(v) end })
+    MoveSet:CreateSlider({ Text = "Flight Speed", Min = 10, Max = 300, Default = 50, Index = "Adv_FlightSpeed",
+        Callback = function(v) Settings.Advanced.Flight_Speed = v end })
+
+    -- Sync + Desync (ambos separados)
+    local SyncSet = AdvancedTab:CreateSection("Sync / Desync")
+    SyncSet:CreateToggle({ Text = "Sync Booster (network)", Default = false, Index = "Sync_Enabled",
+        Callback = function(v)
+            Settings.Sync.Enabled = v
+            if v then Vars.StartSyncBooster() else Vars.StopSyncBooster() end
+        end })
+    SyncSet:CreateToggle({ Text = "Sync: Auto-disable on low FPS", Default = false, Index = "Sync_AutoDisable",
+        Callback = function(v) Settings.Sync.AutoDisableOnLowFPS = v end })
+    SyncSet:CreateToggle({ Text = "Sync: Try FFlag fallback", Default = false, Index = "Sync_FFlagFallback",
+        Callback = function(v) Settings.Sync.TryFFlagFallback = v end })
+    SyncSet:CreateToggle({ Text = "Desync (Seat + Weld)", Default = false, Index = "Adv_Desync",
+        Callback = function(v)
+            Settings.Advanced.Desync_Enabled = v
+            if v then Vars.StartDesync() else Vars.StopDesync() end
+        end })
+    SyncSet:CreateSlider({ Text = "Desync Transparency", Min = 0, Max = 1, Default = 0.5, Index = "Adv_DesyncTrans",
+        Callback = function(v)
+            Settings.Advanced.Desync_Transparency = v
+            if Settings.Advanced.Desync_Enabled and LP.Character then
+                for _, part in ipairs(LP.Character:GetDescendants()) do
+                    if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                        part.LocalTransparencyModifier = v
+                    end
+                end
+            end
+        end })
+
+    -- ============================================================
+    -- Backtrack / Anti-Fall / Movement
     -- ============================================================
     local BacktrackTab = Window:CreateTab("Backtrack")
-    local BTSet = BacktrackTab:CreateSection("Backtrack (Rivals-style)")
+    local BTSet = BacktrackTab:CreateSection("Backtrack")
     BTSet:CreateToggle({ Text = "Enable Backtrack", Default = false, Index = "BT_Enabled",
         Callback = function(v) Settings.Backtrack.Enabled = v end })
     BTSet:CreateSlider({ Text = "Delay (s)", Min = 0.02, Max = 0.3, Default = 0.1, Index = "BT_Delay",
         Callback = function(v) Settings.Backtrack.Delay = v end })
-    BTSet:CreateToggle({ Text = "Show Indicator", Default = false, Index = "BT_ShowIndicator",
-        Callback = function(v) Settings.Backtrack.ShowIndicator = v end })
 
-    -- ============================================================
-    -- TAB: Anti-Fall
-    -- ============================================================
     local AntiFallTab = Window:CreateTab("Anti-Fall")
     local AFSection = AntiFallTab:CreateSection("Anti-Fall Damage")
     AFSection:CreateToggle({ Text = "Disable Fall Damage", Default = false, Index = "AF_Enabled",
@@ -3967,12 +5616,9 @@ do
             if v then Vars.StartAntiFall() else Vars.StopAntiFall() end
         end })
 
-    -- ============================================================
-    -- TAB: Movement
-    -- ============================================================
     local MovementTab = Window:CreateTab("Movement")
     local MSet = MovementTab:CreateSection("Strafe HvH")
-    MSet:CreateToggle({ Text = "Strafe HvH (Window Peek)", Default = false, Index = "Mov_Strafe",
+    MSet:CreateToggle({ Text = "Strafe HvH", Default = false, Index = "Mov_Strafe",
         Callback = function(v)
             Settings.Movement.StrafeEnabled = v
             if v then Vars.StartStrafeHvH() else Vars.StopStrafeHvH() end
@@ -3981,22 +5627,18 @@ do
         Callback = function(v) Settings.Movement.StrafeDistance = v end })
     MSet:CreateSlider({ Text = "Peek Cooldown (s)", Min = 0.02, Max = 0.5, Default = 0.08, Index = "Mov_PeekCooldown",
         Callback = function(v) Settings.Movement.PeekCooldown = v end })
-    MSet:CreateDropdown({ Text = "Strafe Key Left", Options = {"A", "Q", "Z", "X"}, Default = "A", Index = "Mov_KeyLeft",
-        Callback = function(v) if Enum.KeyCode[v] then Settings.Movement.StrafeKeyLeft = Enum.KeyCode[v] end end })
-    MSet:CreateDropdown({ Text = "Strafe Key Right", Options = {"D", "E", "C", "V"}, Default = "D", Index = "Mov_KeyRight",
-        Callback = function(v) if Enum.KeyCode[v] then Settings.Movement.StrafeKeyRight = Enum.KeyCode[v] end end })
 
     -- ============================================================
-    -- TAB: Exploit
+    -- Exploit Tab
     -- ============================================================
     local ExploitTab = Window:CreateTab("Exploit")
     local ExpSet = ExploitTab:CreateSection("Movement")
-    ExpSet:CreateToggle({ Text = "Spinbot (360 continuo)", Default = false, Index = "Exp_Spinbot",
+    ExpSet:CreateToggle({ Text = "Spinbot", Default = false, Index = "Exp_Spinbot",
         Callback = function(v)
             Settings.Exploit.Spinbot = v
             if v then Vars.StartExploitSpinbot() else Vars.StopExploitSpinbot() end
         end })
-    ExpSet:CreateSlider({ Text = "Spin Speed (deg/s)", Min = 60, Max = 2880, Default = 720, Index = "Exp_SpinSpeed",
+    ExpSet:CreateSlider({ Text = "Spin Speed", Min = 60, Max = 2880, Default = 720, Index = "Exp_SpinSpeed",
         Callback = function(v) Settings.Exploit.SpinbotSpeed = v end })
     ExpSet:CreateToggle({ Text = "Walkspeed", Default = false, Index = "Exp_Walkspeed",
         Callback = function(v)
@@ -4031,7 +5673,7 @@ do
         end })
 
     -- ============================================================
-    -- TAB: Hotkeys
+    -- Hotkeys Tab
     -- ============================================================
     local HotkeyTab = Window:CreateTab("Hotkeys")
     local HKSet = HotkeyTab:CreateSection("Configurable Hotkeys")
@@ -4043,22 +5685,44 @@ do
         Callback = function(v) if Enum.KeyCode[v] then Settings.Hotkeys.Panic = Enum.KeyCode[v] end end })
 
     -- ============================================================
-    -- TAB: Utility
+    -- Save/Load Tab
+    -- ============================================================
+    local SaveTab = Window:CreateTab("Save/Load")
+    local SaveSet = SaveTab:CreateSection("Config Saves")
+    SaveSet:CreateButton("Guardar (auto-nombre)", function()
+        local ok = Vars.SaveConfig(nil)
+        if Window.Notify then
+            Window:Notify("Save", ok and ("Guardado: " .. tostring(Settings.Advanced.CurrentSave)) or "Error", 2, ok and "Success" or "Error")
+        end
+    end)
+    SaveSet:CreateButton("Cargar (último)", function()
+        local name = Settings.Advanced.CurrentSave
+        if not name then
+            if Window.Notify then Window:Notify("Save", "No hay save actual", 2, "Warning") end
+            return
+        end
+        local ok = Vars.LoadConfig(name)
+        if Window.Notify then Window:Notify("Save", ok and "Cargado" or "Error", 2, ok and "Success" or "Error") end
+    end)
+    SaveSet:CreateButton("Listar saves", function()
+        local saves = Vars.ListSaves()
+        if Window.Notify then
+            Window:Notify("Save", "Saves: " .. (#saves > 0 and table.concat(saves, ", ") or "ninguno"), 4, "Info")
+        end
+    end)
+    SaveSet:CreateButton("Borrar último", function()
+        if Settings.Advanced.CurrentSave then
+            local ok = Vars.DeleteConfig(Settings.Advanced.CurrentSave)
+            if Window.Notify then Window:Notify("Save", ok and "Borrado" or "Error", 2, ok and "Success" or "Error") end
+        end
+    end)
+
+    -- ============================================================
+    -- Utility Tab
     -- ============================================================
     local UtilityTab = Window:CreateTab("Utility")
-    local USync = UtilityTab:CreateSection("Sync Booster + FPS Helper")
-    USync:CreateToggle({ Text = "Sync Booster (Sync + FPS)", Default = false, Index = "Sync_Enabled",
-        Callback = function(v)
-            Settings.Sync.Enabled = v
-            if v then Vars.StartSyncBooster() else Vars.StopSyncBooster() end
-        end })
-    USync:CreateToggle({ Text = "Auto-disable on low FPS (<30)", Default = false, Index = "Sync_AutoDisable",
-        Callback = function(v) Settings.Sync.AutoDisableOnLowFPS = v end })
-    USync:CreateToggle({ Text = "Try FFlag fallback (one-shot)", Default = false, Index = "Sync_FFlagFallback",
-        Callback = function(v) Settings.Sync.TryFFlagFallback = v end })
-
     local UHUD = UtilityTab:CreateSection("HUD")
-    UHUD:CreateToggle({ Text = "HUD (FPS / Ping / Target / Menu)", Default = true, Index = "HUD_Enabled",
+    UHUD:CreateToggle({ Text = "HUD Enabled", Default = true, Index = "HUD_Enabled",
         Callback = function(v)
             Settings.HUD.Enabled = v
             if not v then
@@ -4068,30 +5732,16 @@ do
                 if Vars.HudAccentLine then Vars.HudAccentLine.Visible = false end
             end
         end })
-    -- ✅ Eliminados los dropdowns de HUD Position, ShowFPS y ShowPing
-    -- (el HUD ahora está fijo abajo estilo Adonis)
+    UHUD:CreateToggle({ Text = "Show FPS", Default = true, Index = "HUD_ShowFPS",
+        Callback = function(v) Settings.HUD.ShowFPS = v end })
+    UHUD:CreateToggle({ Text = "Show Ping", Default = true, Index = "HUD_ShowPing",
+        Callback = function(v) Settings.HUD.ShowPing = v end })
 
     local UPerf = UtilityTab:CreateSection("Performance")
     UPerf:CreateSlider({ Text = "ESP Update Rate (s)", Min = 0.01, Max = 0.2, Default = 0.03, Index = "Perf_ESPRate",
         Callback = function(v) Settings.Performance.ESPUpdateRate = v end })
     UPerf:CreateSlider({ Text = "Skeleton Update Rate (s)", Min = 0.01, Max = 0.2, Default = 0.04, Index = "Perf_SkelRate",
         Callback = function(v) Settings.Performance.SkeletonUpdateRate = v end })
-
-    local UConfig = UtilityTab:CreateSection("Config")
-    UConfig:CreateButton("Guardar", function()
-        if Window.GetSaveManager then
-            local sm = Window:GetSaveManager()
-            sm:Save("default")
-            if Window.Notify then Window:Notify("Config", "Guardado", 2, "Success") end
-        end
-    end)
-    UConfig:CreateButton("Cargar", function()
-        if Window.GetSaveManager then
-            local sm = Window:GetSaveManager()
-            sm:Load("default")
-            if Window.Notify then Window:Notify("Config", "Cargado", 2, "Success") end
-        end
-    end)
 
     local UScript = UtilityTab:CreateSection("Script")
     UScript:CreateButton("Unload", function()
@@ -4131,10 +5781,29 @@ do
             Settings.Exploit.TeleportToCursor = false
             Settings.Aimbot.StickyLock = false
             Settings.Backtrack.Enabled = false
+            Settings.Fun.RagebotEnabled = false
+            Settings.Fun.OrbitEnabled = false
+            Settings.Fun.RagebotOrbitEnabled = false
+            Settings.Fun.BlitzEnabled = false
+            Settings.Advanced.Desync_Enabled = false
+            Settings.Advanced.WX_Enabled = false
+            Settings.Advanced.WP_Enabled = false
+            Settings.Advanced.LF_Enabled = false
+            Settings.Advanced.Truss_Enabled = false
+            Settings.Advanced.Airwalk_Enabled = false
+            Settings.Advanced.Autorespawn_Enabled = false
+            Settings.Advanced.Flight_Enabled = false
+            Settings.Advanced.CamY_Enabled = false
+            Settings.Advanced.CFrameView_Enabled = false
+            Settings.Advanced.QT_Enabled = false
+            Settings.Advanced.Indicator_Enabled = false
+            Settings.Advanced.HitboxViz_Enabled = false
+
             Vars.ClearAllESP()
             Vars.ClearAllSkeletons()
             Vars.ClearItemESP()
             Vars.StopSyncBooster()
+            Vars.StopDesync()
             Vars.StopAntiFall()
             Vars.StopNoRecoil()
             Vars.StopStrafeHvH()
@@ -4149,16 +5818,14 @@ do
             Vars.StopCrosshair()
             Vars.StopTracerLoop()
             Vars.ClearAllTracers()
-            if Vars.ResetAllVisuals then
-                Vars.ResetAllVisuals()
-            else
-                Vars.setFullBright(false)
-                Vars.setNoFog(false)
-                Vars.setNoBloom(false)
-                Vars.setNoSunRays(false)
-                Vars.setCustomFOV(false)
-            end
+            if Vars.ResetAllVisuals then Vars.ResetAllVisuals() end
             Vars.StopXRay()
+            if Vars.ApplyFlight then Vars.ApplyFlight(false) end
+            if Vars.ApplyTruss then Vars.ApplyTruss(false) end
+            if Vars.ApplyAirwalk then Vars.ApplyAirwalk(false) end
+            if Vars.ApplyAutorespawn then Vars.ApplyAutorespawn(false) end
+            if Vars.ApplyWorldXray then Vars.ApplyWorldXray(false) end
+            if Vars.ClearAllHitboxViz then Vars.ClearAllHitboxViz() end
             if Vars.HudLabel then Vars.HudLabel.Visible = false end
             if Vars.HudRightLabel then Vars.HudRightLabel.Visible = false end
             if Vars.HudBackground then Vars.HudBackground.Visible = false end
@@ -4200,9 +5867,11 @@ do
         pcall(function() Vars.exploitFlyKeyEndConn:Disconnect() end)
         pcall(function() Vars.posHistoryConn:Disconnect() end)
         pcall(function() Vars.lightingChildAddedConn:Disconnect() end)
+        pcall(function() Vars.funConn:Disconnect() end)
 
         Vars.StopNoRecoil()
         Vars.StopSyncBooster()
+        Vars.StopDesync()
         Vars.StopAntiFall()
         Vars.StopStrafeHvH()
         Vars.StopExploitSpinbot()
@@ -4216,15 +5885,15 @@ do
         Vars.StopCrosshair()
         Vars.StopTracerLoop()
         Vars.StopXRay()
-        if Vars.ResetAllVisuals then
-            Vars.ResetAllVisuals()
-        else
-            Vars.setFullBright(false)
-            Vars.setNoFog(false)
-            Vars.setNoBloom(false)
-            Vars.setNoSunRays(false)
-            Vars.setCustomFOV(false)
-        end
+
+        if Vars.CleanupAdvanced then pcall(Vars.CleanupAdvanced) end
+        if Vars.ApplyFlight then pcall(Vars.ApplyFlight, false) end
+        if Vars.ApplyTruss then pcall(Vars.ApplyTruss, false) end
+        if Vars.ApplyAirwalk then pcall(Vars.ApplyAirwalk, false) end
+        if Vars.ApplyAutorespawn then pcall(Vars.ApplyAutorespawn, false) end
+        if Vars.ApplyAntiKick then pcall(Vars.ApplyAntiKick, false) end
+
+        if Vars.ResetAllVisuals then Vars.ResetAllVisuals() end
 
         Vars.ClearAllESP()
         Vars.ClearAllSkeletons()
@@ -4247,15 +5916,6 @@ do
         if Vars.HudRightLabel then pcall(function() Vars.HudRightLabel:Remove() end) end
         if Vars.HudBackground then pcall(function() Vars.HudBackground:Remove() end) end
         if Vars.HudAccentLine then pcall(function() Vars.HudAccentLine:Remove() end) end
-
-        Vars.stickyTarget = nil
-        Vars.stickyLastSeen = 0
-        Vars.positionHistory = {}
-
-        for _, c in ipairs(Vars.tracerConnections) do
-            pcall(function() c:Disconnect() end)
-        end
-        Vars.tracerConnections = {}
 
         if _env.TownUI_Window then
             pcall(function()
@@ -4284,11 +5944,11 @@ do
         end
     end)
 
-    task.delay(1.0, function()
+    task.delay(1.5, function()
         if _env.TownUI_Window then
             pcall(function()
                 _env.TownUI_Window:Notify(
-                    "Town Complete v9.8.3",
+                    "Town Complete v9.9.0",
                     "RightShift = Menu | Y = Helper | End = Panic",
                     6, "Success"
                 )
