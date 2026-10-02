@@ -1,40 +1,270 @@
 --!strict
--- ============================================================
--- Town Complete v9.9.8 (Scryux UI) - Parte 1/3
--- Aimbot Humano + Aim Assist Mejorado + Indicator Blanco
--- ============================================================
 
 local _env = getgenv and getgenv() or _G
 local realPrint = print
 local realWarn  = warn
 
--- ============================================================
--- BLOQUE 0: Logger
--- ============================================================
+rawset(_env, "__TownRealPrint", realPrint)
+rawset(_env, "__TownRealWarn",  realWarn)
+
 local Logger = {
-    level = "WARN",
+    level = "ERROR",
     prefix = "[TownComplete] ",
     levels = {DEBUG = 1, INFO = 2, WARN = 3, ERROR = 4},
+    _silent = true,
+    _consoleOpen = false,
 }
-function Logger.Log(level, ...)
+
+local function _noop() end
+
+local function _SafeRConsolePrint(msg)
+    if type(rconsoleprint) ~= "function" then return end
+    pcall(rconsoleprint, msg)
+end
+
+local function _LoggerEmit(level, ...)
+    if Logger._silent then
+        local dbg = rawget(_env, "TownDebug")
+        if not dbg and not Logger._consoleOpen then return end
+    end
     if Logger.levels[level] < Logger.levels[Logger.level] then return end
     local args = {...}
     local parts = {}
     for i = 1, #args do parts[i] = tostring(args[i]) end
-    realPrint(Logger.prefix .. "[" .. level .. "] " .. table.concat(parts, " "))
+    local line = Logger.prefix .. "[" .. level .. "] " .. table.concat(parts, " ")
+    if Logger._consoleOpen then
+        local tag = "@@WHITE@@"
+        if level == "WARN"  then tag = "@@YELLOW@@" end
+        if level == "ERROR" then tag = "@@LIGHT_RED@@" end
+        if level == "INFO"  then tag = "@@LIGHT_GREEN@@" end
+        if level == "DEBUG" then tag = "@@LIGHT_GRAY@@" end
+        _SafeRConsolePrint(tag)
+        _SafeRConsolePrint(line .. "\n")
+        _SafeRConsolePrint("@@WHITE@@")
+    else
+        realPrint(line)
+    end
 end
-function Logger.Debug(...) Logger.Log("DEBUG", ...) end
-function Logger.Info(...)  Logger.Log("INFO", ...) end
-function Logger.Warn(...)  Logger.Log("WARN", ...) end
-function Logger.Error(...) Logger.Log("ERROR", ...) end
 
-local function _noop() end
-_env.print = _noop
-_env.warn  = _noop
+function Logger.Debug(...) _LoggerEmit("DEBUG", ...) end
+function Logger.Info(...)  _LoggerEmit("INFO",  ...) end
+function Logger.Warn(...)  _LoggerEmit("WARN",  ...) end
+function Logger.Error(...) _LoggerEmit("ERROR", ...) end
 
--- ============================================================
--- BLOQUE 1: Helpers + Carga de Scryux UI
--- ============================================================
+function Logger.OpenConsole()
+    if type(rconsolecreate) ~= "function" then
+        rawset(_env, "TownDebug", true)
+        Logger._silent = false
+        return false
+    end
+    local ok = pcall(rconsolecreate)
+    if not ok then
+        rawset(_env, "TownDebug", true)
+        Logger._silent = false
+        return false
+    end
+    if type(rconsolesettitle) == "function" then
+        pcall(rconsolesettitle, "TownComplete Debug")
+    end
+    _SafeRConsolePrint("@@LIGHT_CYAN@@[TownComplete] Console debug abierta\n")
+    _SafeRConsolePrint("@@LIGHT_GRAY@@Nivel actual: " .. Logger.level .. "\n")
+    _SafeRConsolePrint("@@WHITE@@")
+    Logger._consoleOpen = true
+    Logger._silent = false
+    return true
+end
+
+function Logger.CloseConsole()
+    Logger._consoleOpen = false
+    Logger._silent = true
+    if type(rconsoledestroy) == "function" then
+        pcall(rconsoledestroy)
+    end
+end
+
+local _ExecName, _ExecVer = "Unknown", "?"
+if type(identifyexecutor) == "function" then
+    local ok, name, ver = pcall(identifyexecutor)
+    if ok then
+        _ExecName = name or _ExecName
+        _ExecVer  = ver  or _ExecVer
+    end
+end
+rawset(_env, "__TownExecutor", _ExecName .. " " .. _ExecVer)
+Logger.ExecName = _ExecName
+Logger.ExecVer  = _ExecVer
+
+rawset(_env, "print", _noop)
+rawset(_env, "warn",  _noop)
+
+function Logger.RestoreGlobalPrint()
+    rawset(_env, "print", realPrint)
+    rawset(_env, "warn",  realWarn)
+end
+
+function Logger.SilenceGlobalPrint()
+    rawset(_env, "print", _noop)
+    rawset(_env, "warn",  _noop)
+end
+
+local function _GetStack(level)
+    local lines = {}
+    level = level or 2
+    for i = level, level + 6 do
+        local ok, info = pcall(debug.getinfo, i, "Sl")
+        if not ok or not info then break end
+        local src = info.short_src or info.source or "?"
+        src = src:gsub("^@", "")
+        local short = src:match("([^/\\]+)$") or src
+        table.insert(lines, string.format("      · %s : línea %d", short, info.currentline or -1))
+    end
+    return lines
+end
+
+local function _ClassifyError(errStr)
+    if not errStr then return "unknown" end
+    local s = tostring(errStr):lower()
+    if s:find("attempt to index", 1, true) then return "index" end
+    if s:find("attempt to call", 1, true) then return "call" end
+    if s:find("attempt to compare", 1, true) then return "compare" end
+    if s:find("attempt to perform arithmetic", 1, true) then return "arith" end
+    if s:find("attempt to concatenate", 1, true) then return "concat" end
+    if s:find("is not a valid member", 1, true) then return "member" end
+    if s:find("permission", 1, true) then return "perm" end
+    if s:find("timeout", 1, true) then return "timeout" end
+    if s:find("stack overflow", 1, true) then return "stack" end
+    if s:find("http", 1, true) then return "http" end
+    if s:find("json", 1, true) then return "json" end
+    if s:find("nil", 1, true) then return "nil" end
+    return "generic"
+end
+
+local _CAT_COLORS = {
+    index    = "@@LIGHT_RED@@",
+    call     = "@@LIGHT_RED@@",
+    compare  = "@@LIGHT_RED@@",
+    arith    = "@@LIGHT_RED@@",
+    concat   = "@@LIGHT_RED@@",
+    member   = "@@LIGHT_RED@@",
+    perm     = "@@YELLOW@@",
+    timeout  = "@@YELLOW@@",
+    stack    = "@@LIGHT_MAGENTA@@",
+    http     = "@@LIGHT_CYAN@@",
+    json     = "@@LIGHT_CYAN@@",
+    nil      = "@@YELLOW@@",
+    generic  = "@@LIGHT_RED@@",
+    unknown  = "@@WHITE@@",
+}
+
+local function _EmitError(context, errStr, errLevel, extraStackLevel)
+    local s = tostring(errStr or "unknown error")
+    local category = _ClassifyError(s)
+    local color = _CAT_COLORS[category] or "@@LIGHT_RED@@"
+    local ctxStr = tostring(context or "?")
+    local sep = "─────────────────────────────────────────────"
+
+    if Logger._consoleOpen then
+        _SafeRConsolePrint("@@LIGHT_GRAY@@" .. sep .. "\n")
+        _SafeRConsolePrint(color .. "⚠ [" .. ctxStr .. "] " .. category:upper() .. "\n")
+        _SafeRConsolePrint("@@WHITE@@  → " .. s .. "\n")
+        local stack = _GetStack((errLevel or 2) + (extraStackLevel or 0))
+        if #stack > 0 then
+            _SafeRConsolePrint("@@LIGHT_GRAY@@  Stack:\n")
+            for _, line in ipairs(stack) do
+                _SafeRConsolePrint("@@LIGHT_GRAY@@" .. line .. "\n")
+            end
+        end
+        _SafeRConsolePrint("@@LIGHT_GRAY@@" .. sep .. "\n")
+        _SafeRConsolePrint("@@WHITE@@")
+    elseif rawget(_env, "TownDebug") then
+        realPrint(Logger.prefix .. "[" .. ctxStr .. "] " .. s)
+        for _, line in ipairs(_GetStack((errLevel or 2) + (extraStackLevel or 0))) do
+            realPrint(line)
+        end
+    end
+end
+
+function Logger.Err(context, err)
+    _EmitError(context, err, 3)
+end
+Logger.ErrorWithHint = Logger.Err
+
+function Logger.SafeCall(context, fn, ...)
+    if type(fn) ~= "function" then return nil end
+    local ok, result = xpcall(fn, function(err)
+        return {
+            msg = tostring(err),
+            trace = debug.traceback("", 2),
+        }
+    end, ...)
+    if not ok then
+        local ctxStr = tostring(context or "SafeCall")
+        if Logger._consoleOpen then
+            local sep = "─────────────────────────────────────────────"
+            _SafeRConsolePrint("@@LIGHT_GRAY@@" .. sep .. "\n")
+            _SafeRConsolePrint("@@LIGHT_RED@@⚠ [" .. ctxStr .. "]\n")
+            _SafeRConsolePrint("@@WHITE@@" .. (result.msg or "unknown") .. "\n")
+            if result.trace then
+                _SafeRConsolePrint("@@LIGHT_GRAY@@  Trace:\n")
+                for line in tostring(result.trace):gmatch("[^\n]+") do
+                    _SafeRConsolePrint("@@LIGHT_GRAY@@      " .. line .. "\n")
+                end
+            end
+            _SafeRConsolePrint("@@LIGHT_GRAY@@" .. sep .. "\n@@WHITE@@")
+        elseif rawget(_env, "TownDebug") then
+            realPrint(Logger.prefix .. "[" .. ctxStr .. "] " .. (result.msg or "unknown"))
+            if result.trace then realPrint(result.trace) end
+        end
+        return nil
+    end
+    return result
+end
+
+do
+    local LogService = game:GetService("LogService")
+
+    local function IsTownMessage(msg)
+        if type(msg) ~= "string" then return false end
+        return string.find(msg, "Town", 1, true) ~= nil
+            or string.find(msg, "TownComplete", 1, true) ~= nil
+            or string.find(msg, "TownUI", 1, true) ~= nil
+    end
+
+    rawset(_env, "__TownLogServiceConn", nil)
+
+    local conn = LogService.MessageOut:Connect(function(message, msgType)
+        if rawget(_env, "__TownUnloaded") then return end
+        if msgType ~= Enum.MessageType.MessageError
+            and msgType ~= Enum.MessageType.MessageWarning then
+            return
+        end
+        if not IsTownMessage(message) then return end
+
+        local isError = (msgType == Enum.MessageType.MessageError)
+        local category = _ClassifyError(message)
+        local color = isError and (_CAT_COLORS[category] or "@@LIGHT_RED@@") or "@@YELLOW@@"
+
+        if Logger._consoleOpen then
+            local sep = "─────────────────────────────────────────────"
+            _SafeRConsolePrint("@@LIGHT_GRAY@@" .. sep .. "\n")
+            _SafeRConsolePrint(color .. "⚠ [Uncaught] " .. (isError and "ERROR" or "WARN") .. "\n")
+            _SafeRConsolePrint("@@WHITE@@" .. tostring(message) .. "\n")
+            local stack = _GetStack(2)
+            if #stack > 0 then
+                _SafeRConsolePrint("@@LIGHT_GRAY@@  Stack:\n")
+                for _, line in ipairs(stack) do
+                    _SafeRConsolePrint("@@LIGHT_GRAY@@" .. line .. "\n")
+                end
+            end
+            _SafeRConsolePrint("@@LIGHT_GRAY@@" .. sep .. "\n@@WHITE@@")
+        elseif rawget(_env, "TownDebug") then
+            realPrint(Logger.prefix .. "[Uncaught] " .. tostring(message))
+        end
+    end)
+
+    rawset(_env, "__TownLogServiceConn", conn)
+end
+
 local ScryuxUI
 do
     local function Has(fn)
@@ -55,7 +285,7 @@ do
         "https://github.com/scryuxdev/Scryux-Library/raw/main/Scryux-Library.lua?t=" .. tostring(os.time()),
     }
     local CACHE_FILE = "scryux_ui_cache.lua"
-    local CACHE_VERSION = "v9.9.8"
+    local CACHE_VERSION = "v9.10"
 
     local function SafeRequest(url)
         if Has("request") then
@@ -133,9 +363,6 @@ if not ScryuxUI then
     return
 end
 
--- ============================================================
--- BLOQUE 2: Servicios + Configuración + Vars
--- ============================================================
 local Vars = {}
 local Settings = {}
 local BODY_PARTS_ALL = {}
@@ -363,9 +590,6 @@ do
     Vars.autorespawnConns = {}
     Vars.autorespawnDeathPos = nil
 
-    -- ============================================
-    -- CONFIGURACIÓN (todo off)
-    -- ============================================
     Settings = {
         ESP = {
             Enabled = false, Chams = false, TeamCheck = false,
@@ -448,7 +672,6 @@ do
             Priority = "FOV",
             StickyLock = false, StickyTimeout = 2,
             RequireGun = false,
-            -- ✅ Human Mode (v9.9.8)
             HumanMode = false,
             SwitchCooldown = 0.45,
             SwitchRange = 40,
@@ -470,7 +693,6 @@ do
             Enabled = false, FOV = 30, ShowFOV = false,
             FOVColor = Color3.fromRGB(0, 255, 255), FOVThickness = 1,
             MaxDistance = 500,
-            -- ✅ v9.9.8: control ampliado
             Smoothness = 0.5,
             Strength = 0.6,
             MaxSpeed = 30,
@@ -484,7 +706,6 @@ do
             Visible = true, UseMouse = false, Priority = "FOV",
             UsePrediction = false, PredictionAmount = 0.13,
             UsePingPrediction = false, Selective = false,
-            -- ✅ Human Assist
             HumanMode = true,
             SwitchCooldown = 0.5,
             SwitchRange = 30,
@@ -603,9 +824,6 @@ do
     Vars.BODY_PARTS_ALL = BODY_PARTS_ALL
 end
 
--- ============================================================
--- BLOQUE 3: Funciones Core
--- ============================================================
 do
     local LP = Vars.LP
     local Workspace = Vars.Workspace
@@ -914,9 +1132,6 @@ do
         return false
     end
 
-    -- ============================================================
-    -- SMART NEAREST (bbox-based) v9.9.7
-    -- ============================================================
     local function GetSmartNearestVisiblePart(player, cam, screenPos, fovRadius, requireVisible, headBonus, torsoBonus)
         if not player or not player.Character then return nil end
         local char = player.Character
@@ -1172,16 +1387,15 @@ do
     Vars.GetBacktrackPosition = GetBacktrackPosition
 
     Vars.posHistoryConn = Vars.RunService.Heartbeat:Connect(function()
-        if Vars.isScriptUnloaded then return end
-        if Settings.Backtrack.Enabled then
-            Vars.UpdatePositionHistory()
-        end
+        Logger.SafeCall("posHistory/Heartbeat", function()
+            if Vars.isScriptUnloaded then return end
+            if Settings.Backtrack.Enabled then
+                Vars.UpdatePositionHistory()
+            end
+        end)
     end)
 end
 
--- ============================================================
--- BLOQUE 4: ESP / Chams / Skeleton / HeadDots / Items / Weapons
--- ============================================================
 do
     local LP = Vars.LP
     local CoreGui = Vars.CoreGui
@@ -1667,21 +1881,27 @@ do
 
     if not Vars.itemAddedConn then
         Vars.itemAddedConn = Vars.Workspace.DescendantAdded:Connect(function(desc)
-            if Vars.isScriptUnloaded then return end
-            if desc:IsA("BasePart") and IsItemPart(desc) then
-                task.defer(CreateItemESP, desc)
-            end
+            Logger.SafeCall("itemAdded", function()
+                if Vars.isScriptUnloaded then return end
+                if desc:IsA("BasePart") and IsItemPart(desc) then
+                    task.defer(function()
+                        Logger.SafeCall("CreateItemESP", CreateItemESP, desc)
+                    end)
+                end
+            end)
         end)
     end
 
     if not Vars.itemRemovingConn then
         Vars.itemRemovingConn = Vars.Workspace.DescendantRemoving:Connect(function(desc)
-            if Vars.isScriptUnloaded then return end
-            local label = ItemESPList[desc]
-            if label then
-                pcall(function() label:Remove() end)
-                ItemESPList[desc] = nil
-            end
+            Logger.SafeCall("itemRemoving", function()
+                if Vars.isScriptUnloaded then return end
+                local label = ItemESPList[desc]
+                if label then
+                    pcall(function() label:Remove() end)
+                    ItemESPList[desc] = nil
+                end
+            end)
         end)
     end
 
@@ -1694,37 +1914,40 @@ do
         end
     end
     Vars.RebuildActivePlayers = RebuildActivePlayers
-    RebuildActivePlayers()
+    Logger.SafeCall("RebuildActivePlayers", RebuildActivePlayers)
 
+    -- ✅ Loop ESP/Skeleton envuelto en SafeCall
     Vars.espSkeletonConn = Vars.RunService.RenderStepped:Connect(function()
-        if Vars.isScriptUnloaded then return end
+        Logger.SafeCall("espSkeleton/RenderStepped", function()
+            if Vars.isScriptUnloaded then return end
 
-        local now = os_clock()
-        local players = Vars.activePlayers
-        if not players or #players == 0 then return end
+            local now = os_clock()
+            local players = Vars.activePlayers
+            if not players or #players == 0 then return end
 
-        if Settings.ESP.Enabled then
-            local espRate = Settings.Performance.ESPUpdateRate or 0.03
-            if (now - Vars.lastESPUpdate) >= espRate then
-                Vars.lastESPUpdate = now
-                for i = 1, #players do
-                    SilentPcall(UpdateESPForPlayer, players[i])
-                end
-                if Settings.ESP.Items then
-                    SilentPcall(UpdateItemESP)
-                end
-            end
-        end
-
-        if Settings.Skeleton.Enabled then
-            local skRate = Settings.Performance.SkeletonUpdateRate or 0.04
-            if (now - Vars.lastSkeletonUpdate) >= skRate then
-                Vars.lastSkeletonUpdate = now
-                for i = 1, #players do
-                    SilentPcall(UpdateSkeletonForPlayer, players[i])
+            if Settings.ESP.Enabled then
+                local espRate = Settings.Performance.ESPUpdateRate or 0.03
+                if (now - Vars.lastESPUpdate) >= espRate then
+                    Vars.lastESPUpdate = now
+                    for i = 1, #players do
+                        SilentPcall(UpdateESPForPlayer, players[i])
+                    end
+                    if Settings.ESP.Items then
+                        SilentPcall(UpdateItemESP)
+                    end
                 end
             end
-        end
+
+            if Settings.Skeleton.Enabled then
+                local skRate = Settings.Performance.SkeletonUpdateRate or 0.04
+                if (now - Vars.lastSkeletonUpdate) >= skRate then
+                    Vars.lastSkeletonUpdate = now
+                    for i = 1, #players do
+                        SilentPcall(UpdateSkeletonForPlayer, players[i])
+                    end
+                end
+            end
+        end)
     end)
 end
 
@@ -1795,131 +2018,143 @@ do
     Vars.GetPing = GetPing
 
     Vars.fpsCounterConn = RunService.RenderStepped:Connect(function()
-        if Vars.isScriptUnloaded then return end
-        frameCount = frameCount + 1
-        local now = os_clock()
-        if (now - lastFPSReset) >= 1 then
-            cachedFPS = frameCount
-            frameCount = 0
-            lastFPSReset = now
-        end
+        Logger.SafeCall("fpsCounter", function()
+            if Vars.isScriptUnloaded then return end
+            frameCount = frameCount + 1
+            local now = os_clock()
+            if (now - lastFPSReset) >= 1 then
+                cachedFPS = frameCount
+                frameCount = 0
+                lastFPSReset = now
+            end
+        end)
     end)
 
     Vars.pingUpdateConn = RunService.Heartbeat:Connect(function()
-        if Vars.isScriptUnloaded then return end
-        pcall(function() cachedPing = GetPing() end)
+        Logger.SafeCall("pingUpdate", function()
+            if Vars.isScriptUnloaded then return end
+            pcall(function() cachedPing = GetPing() end)
+        end)
     end)
 
     Vars.hudConn = RunService.RenderStepped:Connect(function()
-        if Vars.isScriptUnloaded then return end
-        if not Settings.HUD.Enabled then
-            HudLabel.Visible = false
-            HudRightLabel.Visible = false
-            HudBackground.Visible = false
-            HudAccentLine.Visible = false
-            return
-        end
-
-        local cam = GetCamera()
-        if not cam then return end
-        local viewport = cam.ViewportSize
-
-        local leftParts = {}
-        if Settings.HUD.ShowPing then
-            table_insert(leftParts, "PING " .. cachedPing .. "ms")
-        end
-        if Settings.HUD.ShowFPS then
-            table_insert(leftParts, "FPS " .. cachedFPS)
-        end
-
-        if Vars.TargetManager then
-            local t = Vars.TargetManager:GetCurrentTarget()
-            if t and t.player then
-                table_insert(leftParts, "TARGET " .. t.player.Name)
-            else
-                table_insert(leftParts, "TARGET None")
+        Logger.SafeCall("hud/RenderStepped", function()
+            if Vars.isScriptUnloaded then return end
+            if not Settings.HUD.Enabled then
+                HudLabel.Visible = false
+                HudRightLabel.Visible = false
+                HudBackground.Visible = false
+                HudAccentLine.Visible = false
+                return
             end
-        end
 
-        table_insert(leftParts, "MENU " .. Settings.Hotkeys.ToggleMenu.Name)
-        if Settings.Sync.Enabled then table_insert(leftParts, "SYNC") end
-        if Settings.Advanced.Desync_Enabled then table_insert(leftParts, "DESYNC") end
-        if Settings.Advanced.FPSBooster_Enabled then table_insert(leftParts, "FPSBOOST") end
-        if Settings.Advanced.AntiKick then table_insert(leftParts, "ANTIKICK") end
+            local cam = GetCamera()
+            if not cam then return end
+            local viewport = cam.ViewportSize
 
-        local leftText = table_concat(leftParts, "  |  ")
-
-        local rightText = ""
-        if Settings.Aimbot.Enabled then
-            local mode = Settings.Aimbot.AimPartMode
-            if mode == "Smart Nearest" then
-                rightText = "AIM Smart (" .. (Vars.currentSmartPartName or "Searching") .. ")"
-            elseif mode == "Selective FOV" then
-                rightText = "AIM Selective (" .. (Vars.currentSelectivePartName or "Auto") .. ")"
-            elseif mode == "Hybrid" then
-                rightText = "AIM Hybrid (" .. (Vars.currentHybridPartName or "Head") .. ")"
-            else
-                rightText = "AIM " .. mode
+            local leftParts = {}
+            if Settings.HUD.ShowPing then
+                table_insert(leftParts, "PING " .. cachedPing .. "ms")
             end
-        end
+            if Settings.HUD.ShowFPS then
+                table_insert(leftParts, "FPS " .. cachedFPS)
+            end
 
-        if cachedFPS >= 60 then
-            HudLabel.Color = Color3.fromRGB(0, 255, 120)
-        elseif cachedFPS >= 30 then
-            HudLabel.Color = Color3.fromRGB(255, 220, 0)
-        else
-            HudLabel.Color = Color3.fromRGB(255, 60, 60)
-        end
+            if Vars.TargetManager then
+                local t = Vars.TargetManager:GetCurrentTarget()
+                if t and t.player then
+                    table_insert(leftParts, "TARGET " .. t.player.Name)
+                else
+                    table_insert(leftParts, "TARGET None")
+                end
+            end
 
-        HudLabel.Text = leftText
-        HudRightLabel.Text = rightText
+            table_insert(leftParts, "MENU " .. Settings.Hotkeys.ToggleMenu.Name)
+            if Settings.Sync.Enabled then table_insert(leftParts, "SYNC") end
+            if Settings.Advanced.Desync_Enabled then table_insert(leftParts, "DESYNC") end
+            if Settings.Advanced.FPSBooster_Enabled then table_insert(leftParts, "FPSBOOST") end
+            if Settings.Advanced.AntiKick then table_insert(leftParts, "ANTIKICK") end
 
-        local barHeight = 24
-        local barY = viewport.Y - barHeight - 6
-        local barX = 8
-        local barWidth = viewport.X - 16
+            local leftText = table_concat(leftParts, "  |  ")
 
-        HudBackground.Size = V2(barWidth, barHeight)
-        HudBackground.Position = V2(barX, barY)
-        HudBackground.Visible = true
+            local rightText = ""
+            if Settings.Aimbot.Enabled then
+                local mode = Settings.Aimbot.AimPartMode
+                if mode == "Smart Nearest" then
+                    rightText = "AIM Smart (" .. (Vars.currentSmartPartName or "Searching") .. ")"
+                elseif mode == "Selective FOV" then
+                    rightText = "AIM Selective (" .. (Vars.currentSelectivePartName or "Auto") .. ")"
+                elseif mode == "Hybrid" then
+                    rightText = "AIM Hybrid (" .. (Vars.currentHybridPartName or "Head") .. ")"
+                else
+                    rightText = "AIM " .. mode
+                end
+            end
 
-        HudAccentLine.From = V2(barX, barY)
-        HudAccentLine.To = V2(barX + barWidth, barY)
-        HudAccentLine.Color = HudLabel.Color
-        HudAccentLine.Visible = true
+            if cachedFPS >= 60 then
+                HudLabel.Color = Color3.fromRGB(0, 255, 120)
+            elseif cachedFPS >= 30 then
+                HudLabel.Color = Color3.fromRGB(255, 220, 0)
+            else
+                HudLabel.Color = Color3.fromRGB(255, 60, 60)
+            end
 
-        HudLabel.Position = V2(barX + 12, barY + 4)
-        HudLabel.Visible = true
+            HudLabel.Text = leftText
+            HudRightLabel.Text = rightText
 
-        if rightText ~= "" then
-            HudRightLabel.Position = V2(barX + barWidth - 260, barY + 4)
-            HudRightLabel.Visible = true
-        else
-            HudRightLabel.Visible = false
-        end
+            local barHeight = 24
+            local barY = viewport.Y - barHeight - 6
+            local barX = 8
+            local barWidth = viewport.X - 16
+
+            HudBackground.Size = V2(barWidth, barHeight)
+            HudBackground.Position = V2(barX, barY)
+            HudBackground.Visible = true
+
+            HudAccentLine.From = V2(barX, barY)
+            HudAccentLine.To = V2(barX + barWidth, barY)
+            HudAccentLine.Color = HudLabel.Color
+            HudAccentLine.Visible = true
+
+            HudLabel.Position = V2(barX + 12, barY + 4)
+            HudLabel.Visible = true
+
+            if rightText ~= "" then
+                HudRightLabel.Position = V2(barX + barWidth - 260, barY + 4)
+                HudRightLabel.Visible = true
+            else
+                HudRightLabel.Visible = false
+            end
+        end)
     end)
 
     Vars.playerAddedConn = Players.PlayerAdded:Connect(function(p)
-        if p ~= LP then Vars.RebuildActivePlayers() end
+        Logger.SafeCall("playerAdded", function()
+            if p ~= LP then Vars.RebuildActivePlayers() end
+        end)
     end)
 
     Vars.playerRemovingConn = Players.PlayerRemoving:Connect(function(p)
-        Vars.RemoveESPForPlayer(p.Name)
-        Vars.ClearSkeletonForPlayer(p.Name)
-        Vars.visibilityCache[p.Name] = nil
-        Vars.highlightCooldowns[p.Name] = nil
-        Vars.positionHistory[p.Name] = nil
-        Vars.RebuildActivePlayers()
+        Logger.SafeCall("playerRemoving", function()
+            Vars.RemoveESPForPlayer(p.Name)
+            Vars.ClearSkeletonForPlayer(p.Name)
+            Vars.visibilityCache[p.Name] = nil
+            Vars.highlightCooldowns[p.Name] = nil
+            Vars.positionHistory[p.Name] = nil
+            Vars.RebuildActivePlayers()
+        end)
     end)
 
     Vars.localCharConn = LP.CharacterAdded:Connect(function()
-        task.wait(0.5)
-        Vars.ClearAllSkeletons()
-        Vars.ClearAllESP()
-        Vars.isLocalDead = false
-        if Vars.RebuildIgnoreList then
-            Vars.RebuildIgnoreList(nil)
-        end
+        Logger.SafeCall("localCharAdded", function()
+            task.wait(0.5)
+            Vars.ClearAllSkeletons()
+            Vars.ClearAllESP()
+            Vars.isLocalDead = false
+            if Vars.RebuildIgnoreList then
+                Vars.RebuildIgnoreList(nil)
+            end
+        end)
     end)
 
     Vars.localDiedConn = nil
@@ -1927,7 +2162,9 @@ do
         local hum = LP.Character:FindFirstChildOfClass("Humanoid")
         if hum then
             Vars.localDiedConn = hum.Died:Connect(function()
-                Vars.isLocalDead = true
+                Logger.SafeCall("localDied", function()
+                    Vars.isLocalDead = true
+                end)
             end)
         end
     end
@@ -2035,13 +2272,15 @@ do
     Vars.ResetAllVisuals = ResetAllVisuals
 
     Vars.lightingChildAddedConn = Lighting.ChildAdded:Connect(function(child)
-        if Vars.isScriptUnloaded then return end
-        if Settings.Visuals.NoBloom and child:IsA("BloomEffect") then
-            child.Enabled = false
-        end
-        if Settings.Visuals.NoSunRays and child:IsA("SunRaysEffect") then
-            child.Enabled = false
-        end
+        Logger.SafeCall("lightingChildAdded", function()
+            if Vars.isScriptUnloaded then return end
+            if Settings.Visuals.NoBloom and child:IsA("BloomEffect") then
+                child.Enabled = false
+            end
+            if Settings.Visuals.NoSunRays and child:IsA("SunRaysEffect") then
+                child.Enabled = false
+            end
+        end)
     end)
 
     local HIDE_BODY_PARTS = {
@@ -2085,10 +2324,12 @@ do
     local function StartHideBody()
         if Vars.hideBodyConnection then return end
         Vars.hideBodyConnection = RunService.RenderStepped:Connect(function()
-            if Vars.isScriptUnloaded then return end
-            if Settings.Visuals.HideBody or Settings.Visuals.HideHands or Settings.Visuals.HideTool then
-                pcall(ApplyHideBody)
-            end
+            Logger.SafeCall("hideBody/RenderStepped", function()
+                if Vars.isScriptUnloaded then return end
+                if Settings.Visuals.HideBody or Settings.Visuals.HideHands or Settings.Visuals.HideTool then
+                    pcall(ApplyHideBody)
+                end
+            end)
         end)
     end
     Vars.StartHideBody = StartHideBody
@@ -2169,7 +2410,9 @@ do
     local function StartCrosshair()
         if Vars.CrosshairConn then return end
         CreateCrosshairLines()
-        Vars.CrosshairConn = RunService.RenderStepped:Connect(UpdateCrosshair)
+        Vars.CrosshairConn = RunService.RenderStepped:Connect(function()
+            Logger.SafeCall("crosshair/RenderStepped", UpdateCrosshair)
+        end)
     end
     Vars.StartCrosshair = StartCrosshair
 
@@ -2277,7 +2520,9 @@ do
 
     local function StartTracerLoop()
         if Vars.tracerLoopConn then return end
-        Vars.tracerLoopConn = RunService.RenderStepped:Connect(UpdateTracers)
+        Vars.tracerLoopConn = RunService.RenderStepped:Connect(function()
+            Logger.SafeCall("tracerLoop", UpdateTracers)
+        end)
     end
     Vars.StartTracerLoop = StartTracerLoop
 
@@ -2428,11 +2673,17 @@ do
         if Vars.noRecoilRunning then return end
         Vars.noRecoilRunning = true
         RebuildNoRecoilCache()
-        table_insert(Vars.noRecoilConnections, LP.CharacterAdded:Connect(RebuildNoRecoilCache))
+        table_insert(Vars.noRecoilConnections, LP.CharacterAdded:Connect(function()
+            Logger.SafeCall("noRecoil/charAdded", RebuildNoRecoilCache)
+        end))
         if LP.Backpack then
-            table_insert(Vars.noRecoilConnections, LP.Backpack.ChildAdded:Connect(RebuildNoRecoilCache))
+            table_insert(Vars.noRecoilConnections, LP.Backpack.ChildAdded:Connect(function()
+                Logger.SafeCall("noRecoil/backpackAdded", RebuildNoRecoilCache)
+            end))
         end
-        local conn = RunService.Heartbeat:Connect(NoRecoilTick)
+        local conn = RunService.Heartbeat:Connect(function()
+            Logger.SafeCall("noRecoil/Heartbeat", NoRecoilTick)
+        end)
         table_insert(Vars.noRecoilConnections, conn)
     end
     Vars.StartNoRecoil = StartNoRecoil
@@ -2453,7 +2704,7 @@ do
             local partList, lastRefresh = {}, 0
             local lastPartCleanup = 0
             while Vars.xrayActive do
-                pcall(function()
+                Logger.SafeCall("xray/tick", function()
                     local cam = GetCamera()
                     if not cam then return end
                     local camPos = cam.CFrame.Position
@@ -2525,7 +2776,7 @@ do
 end
 
 -- ============================================================
--- BLOQUE 7: Target Manager + Aimbot (Humano) + Aim Assist (mejorado)
+-- BLOQUE 7: Target Manager + Aimbot + Aim Assist
 -- ============================================================
 do
     local RunService = Vars.RunService
@@ -2902,14 +3153,13 @@ do
     end
     Vars.CheckAnti360 = CheckAnti360
 
-    -- ✅ Helper: easing
     local function GetEasedFraction(t, style)
         t = math_clamp(t, 0, 1)
         if style == "Linear" then
             return t
         elseif style == "EaseOut" then
             return 1 - (1 - t) * (1 - t) * (1 - t)
-        else -- EaseInOut
+        else
             return t < 0.5 and (2 * t * t) or (1 - ((-2 * t + 2) ^ 2) / 2)
         end
     end
@@ -2972,7 +3222,6 @@ do
             Vars.stickyTarget = nil
         end
 
-        -- ✅ HUMAN MODE: switch con cooldown y rango
         local current = TargetManager:GetCurrentTarget()
         local canSwitch = (not current) or (now - lastSwitchTime >= (Settings.Aimbot.SwitchCooldown or 0.45))
         local shouldLookForNew = (not current) or (Settings.Aimbot.HumanMode and canSwitch)
@@ -3049,7 +3298,6 @@ do
             end
         end
 
-        -- ✅ Humanize: micro-jitter
         if Settings.Aimbot.Humanize then
             jitterSeed = jitterSeed + dt * (Settings.Aimbot.JitterSpeed or 12)
             local jit = Settings.Aimbot.JitterAmount or 0.35
@@ -3102,30 +3350,34 @@ do
         end
     end
 
-    Vars.aimbotConn = RunService.RenderStepped:Connect(MainAimbotLoop)
+    -- ✅ Aimbot loop en SafeCall
+    Vars.aimbotConn = RunService.RenderStepped:Connect(function()
+        Logger.SafeCall("aimbot/RenderStepped", MainAimbotLoop)
+    end)
 
     local fovCircle = nil
     Vars.fovConn = RunService.RenderStepped:Connect(function()
-        if Vars.isScriptUnloaded then return end
-        if not fovCircle then
-            fovCircle = Drawing.new("Circle")
-            fovCircle.Filled = false
-            fovCircle.Visible = false
-        end
-        fovCircle.Visible = Settings.Aimbot.ShowFOV and Settings.Aimbot.Enabled and not IsMenuOpen()
-        if fovCircle.Visible then
-            local cam = GetCamera()
-            local r = ComputeFOVRadius(cam, Settings.Aimbot.FOV)
-            local mp = UserInputService:GetMouseLocation()
-            fovCircle.Position = V2(mp.X, mp.Y)
-            fovCircle.Radius = r
-            fovCircle.Color = Settings.Aimbot.FOVColor
-            fovCircle.Thickness = Settings.Aimbot.FOVThickness
-        end
+        Logger.SafeCall("fovCircle/RenderStepped", function()
+            if Vars.isScriptUnloaded then return end
+            if not fovCircle then
+                fovCircle = Drawing.new("Circle")
+                fovCircle.Filled = false
+                fovCircle.Visible = false
+            end
+            fovCircle.Visible = Settings.Aimbot.ShowFOV and Settings.Aimbot.Enabled and not IsMenuOpen()
+            if fovCircle.Visible then
+                local cam = GetCamera()
+                local r = ComputeFOVRadius(cam, Settings.Aimbot.FOV)
+                local mp = UserInputService:GetMouseLocation()
+                fovCircle.Position = V2(mp.X, mp.Y)
+                fovCircle.Radius = r
+                fovCircle.Color = Settings.Aimbot.FOVColor
+                fovCircle.Thickness = Settings.Aimbot.FOVThickness
+            end
+        end)
     end)
     Vars.GetFOVCircle = function() return fovCircle end
 
-    -- ✅ Indicator blanco en la parte seleccionada (v9.9.8)
     local targetIndicator = nil
     local INDICATOR_RADIUS = {
         Head = 8,
@@ -3140,56 +3392,62 @@ do
         ["Left Leg"] = 8, ["Right Leg"] = 8,
     }
     Vars.targetIndicatorConn = RunService.RenderStepped:Connect(function()
-        if Vars.isScriptUnloaded then return end
-        if not Settings.Aimbot.Enabled then
-            if targetIndicator then targetIndicator.Visible = false end
-            return
-        end
-        if not targetIndicator then
-            targetIndicator = Drawing.new("Circle")
-            targetIndicator.Filled = false
-            targetIndicator.Thickness = 2
-            targetIndicator.Color = Color3.fromRGB(255, 255, 255)
-            targetIndicator.Transparency = 1
-            targetIndicator.Visible = false
-        end
-        local t = TargetManager:GetCurrentTarget()
-        if t and t.part and t.part.Parent then
-            local sp, onScreen = GetCamera():WorldToViewportPoint(t.part.Position)
-            if onScreen then
-                targetIndicator.Position = V2(sp.X, sp.Y)
-                targetIndicator.Radius = INDICATOR_RADIUS[t.part.Name] or 8
-                targetIndicator.Visible = true
+        Logger.SafeCall("targetIndicator/RenderStepped", function()
+            if Vars.isScriptUnloaded then return end
+            if not Settings.Aimbot.Enabled then
+                if targetIndicator then targetIndicator.Visible = false end
+                return
+            end
+            if not targetIndicator then
+                targetIndicator = Drawing.new("Circle")
+                targetIndicator.Filled = false
+                targetIndicator.Thickness = 2
+                targetIndicator.Color = Color3.fromRGB(255, 255, 255)
+                targetIndicator.Transparency = 1
+                targetIndicator.Visible = false
+            end
+            local t = TargetManager:GetCurrentTarget()
+            if t and t.part and t.part.Parent then
+                local sp, onScreen = GetCamera():WorldToViewportPoint(t.part.Position)
+                if onScreen then
+                    targetIndicator.Position = V2(sp.X, sp.Y)
+                    targetIndicator.Radius = INDICATOR_RADIUS[t.part.Name] or 8
+                    targetIndicator.Visible = true
+                else
+                    targetIndicator.Visible = false
+                end
             else
                 targetIndicator.Visible = false
             end
-        else
-            targetIndicator.Visible = false
-        end
+        end)
     end)
     Vars.GetTargetIndicator = function() return targetIndicator end
 
     Vars.aimKeyBeganConn = UserInputService.InputBegan:Connect(function(input, gp)
-        if gp then return end
-        if input.KeyCode == Settings.Hotkeys.Helper then
-            Vars.aimbotHelperActive = not Vars.aimbotHelperActive
-            if _env.TownUI_Window and _env.TownUI_Window.Notify then
-                pcall(function()
-                    _env.TownUI_Window:Notify("Helper",
-                        Vars.aimbotHelperActive and "Aim: Helper mode" or "Aim: Base mode",
-                        1.5, "Info")
-                end)
+        Logger.SafeCall("aimKeyBegan", function()
+            if gp then return end
+            if input.KeyCode == Settings.Hotkeys.Helper then
+                Vars.aimbotHelperActive = not Vars.aimbotHelperActive
+                if _env.TownUI_Window and _env.TownUI_Window.Notify then
+                    pcall(function()
+                        _env.TownUI_Window:Notify("Helper",
+                            Vars.aimbotHelperActive and "Aim: Helper mode" or "Aim: Base mode",
+                            1.5, "Info")
+                    end)
+                end
             end
-        end
-        if input.KeyCode == Settings.Aimbot.AimKey then Vars.aimKeyHeld = true end
+            if input.KeyCode == Settings.Aimbot.AimKey then Vars.aimKeyHeld = true end
+        end)
     end)
 
     Vars.aimKeyEndedConn = UserInputService.InputEnded:Connect(function(input)
-        if input.KeyCode == Settings.Aimbot.AimKey then Vars.aimKeyHeld = false end
+        Logger.SafeCall("aimKeyEnded", function()
+            if input.KeyCode == Settings.Aimbot.AimKey then Vars.aimKeyHeld = false end
+        end)
     end)
 
     -- ============================================================
-    -- AIM ASSIST v9.9.8 (mejorado)
+    -- AIM ASSIST v9.10
     -- ============================================================
     local aimAssistEngaged = false
     local lastAASwitch = 0
@@ -3351,7 +3609,9 @@ do
         lastAASwitch = 0
         Vars.aimAssistLastMousePos = UserInputService:GetMouseLocation()
         Vars.aimAssistLastMovementTime = 0
-        Vars.aimAssistConnection = RunService.RenderStepped:Connect(AimAssistLoop)
+        Vars.aimAssistConnection = RunService.RenderStepped:Connect(function()
+            Logger.SafeCall("aimAssist/RenderStepped", AimAssistLoop)
+        end)
         if not Vars.aimAssistFOVCircle then
             Vars.aimAssistFOVCircle = Drawing.new("Circle")
             Vars.aimAssistFOVCircle.Filled = false
@@ -3359,19 +3619,21 @@ do
         end
         if not Vars.aimAssistFOVConn then
             Vars.aimAssistFOVConn = RunService.RenderStepped:Connect(function()
-                if Vars.isScriptUnloaded then return end
-                if not Vars.aimAssistFOVCircle then return end
-                Vars.aimAssistFOVCircle.Visible = Settings.AimAssist.ShowFOV
-                    and Settings.AimAssist.Enabled and not IsMenuOpen()
-                if Vars.aimAssistFOVCircle.Visible then
-                    local cam = GetCamera()
-                    local r = ComputeFOVRadius(cam, Settings.AimAssist.FOV)
-                    local mp = UserInputService:GetMouseLocation()
-                    Vars.aimAssistFOVCircle.Position = V2(mp.X, mp.Y)
-                    Vars.aimAssistFOVCircle.Radius = r
-                    Vars.aimAssistFOVCircle.Color = Settings.AimAssist.FOVColor
-                    Vars.aimAssistFOVCircle.Thickness = Settings.AimAssist.FOVThickness
-                end
+                Logger.SafeCall("aimAssistFOV/RenderStepped", function()
+                    if Vars.isScriptUnloaded then return end
+                    if not Vars.aimAssistFOVCircle then return end
+                    Vars.aimAssistFOVCircle.Visible = Settings.AimAssist.ShowFOV
+                        and Settings.AimAssist.Enabled and not IsMenuOpen()
+                    if Vars.aimAssistFOVCircle.Visible then
+                        local cam = GetCamera()
+                        local r = ComputeFOVRadius(cam, Settings.AimAssist.FOV)
+                        local mp = UserInputService:GetMouseLocation()
+                        Vars.aimAssistFOVCircle.Position = V2(mp.X, mp.Y)
+                        Vars.aimAssistFOVCircle.Radius = r
+                        Vars.aimAssistFOVCircle.Color = Settings.AimAssist.FOVColor
+                        Vars.aimAssistFOVCircle.Thickness = Settings.AimAssist.FOVThickness
+                    end
+                end)
             end)
         end
     end
@@ -3489,24 +3751,26 @@ do
         syncData.lowFPSCount = 0
         syncData.radiusResetCount = 0
         syncData.connection = RunService.Heartbeat:Connect(function()
-            if not syncData.enabled then return end
-            local now = os_clock()
-            if (now - syncData.lastUpdate) < syncData.UPDATE_INTERVAL then return end
-            syncData.lastUpdate = now
-            if #Players:GetPlayers() < 2 then return end
-            SyncTick()
-            if Settings.Sync.AutoDisableOnLowFPS then
-                local fps = GetCurrentFPS()
-                if fps > 0 and fps < SYNC_LOW_FPS_THRESHOLD then
-                    syncData.lowFPSCount = syncData.lowFPSCount + 1
-                    if syncData.lowFPSCount >= SYNC_LOW_FPS_TICKS then
+            Logger.SafeCall("sync/Heartbeat", function()
+                if not syncData.enabled then return end
+                local now = os_clock()
+                if (now - syncData.lastUpdate) < syncData.UPDATE_INTERVAL then return end
+                syncData.lastUpdate = now
+                if #Players:GetPlayers() < 2 then return end
+                SyncTick()
+                if Settings.Sync.AutoDisableOnLowFPS then
+                    local fps = GetCurrentFPS()
+                    if fps > 0 and fps < SYNC_LOW_FPS_THRESHOLD then
+                        syncData.lowFPSCount = syncData.lowFPSCount + 1
+                        if syncData.lowFPSCount >= SYNC_LOW_FPS_TICKS then
+                            syncData.lowFPSCount = 0
+                            StopSyncBooster()
+                        end
+                    else
                         syncData.lowFPSCount = 0
-                        StopSyncBooster()
                     end
-                else
-                    syncData.lowFPSCount = 0
                 end
-            end
+            end)
         end)
     end
     Vars.StartSyncBooster = StartSyncBooster
@@ -3531,12 +3795,14 @@ do
     Vars.StopSyncBooster = StopSyncBooster
 
     Vars.syncCharConn = LP.CharacterAdded:Connect(function()
-        if syncData.enabled then
-            task.wait(0.5)
+        Logger.SafeCall("sync/charAdded", function()
             if syncData.enabled then
-                ApplySimulationRadius(SYNC_RADIUS_BOOSTED, SYNC_RADIUS_BOOSTED_MAX, true)
+                task.wait(0.5)
+                if syncData.enabled then
+                    ApplySimulationRadius(SYNC_RADIUS_BOOSTED, SYNC_RADIUS_BOOSTED_MAX, true)
+                end
             end
-        end
+        end)
     end)
 
     local function StartDesync()
@@ -3587,14 +3853,18 @@ do
         end
 
         Vars.desyncConnection = RunService.Heartbeat:Connect(function()
-            if not Vars.desyncActive then return end
-            if Vars.desyncSeat and Vars.desyncSeat.Parent and Vars.desyncHiddenPos then
-                Vars.desyncSeat.CFrame = CFrame_new(Vars.desyncHiddenPos)
-            end
+            Logger.SafeCall("desync/Heartbeat", function()
+                if not Vars.desyncActive then return end
+                if Vars.desyncSeat and Vars.desyncSeat.Parent and Vars.desyncHiddenPos then
+                    Vars.desyncSeat.CFrame = CFrame_new(Vars.desyncHiddenPos)
+                end
+            end)
         end)
 
         Vars.desyncCharConn = LP.CharacterAdded:Connect(function()
-            Vars.StopDesync()
+            Logger.SafeCall("desync/charAdded", function()
+                Vars.StopDesync()
+            end)
         end)
 
         Vars.desyncActive = true
@@ -3659,37 +3929,43 @@ do
             if not hum or not hrp then return end
             hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
             local stateConn = hum.StateChanged:Connect(function(_, newState)
-                if newState == Enum.HumanoidStateType.Ragdoll then
-                    hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-                end
+                Logger.SafeCall("antiFall/stateChanged", function()
+                    if newState == Enum.HumanoidStateType.Ragdoll then
+                        hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+                    end
+                end)
             end)
             local rayParams = RaycastParams.new()
             rayParams.FilterType = Enum.RaycastFilterType.Exclude
             rayParams.FilterDescendantsInstances = {char}
             local startY = nil
             local heartbeatConn = RunService.Heartbeat:Connect(function()
-                if not Vars.antiFallRunning then return end
-                local r = char:FindFirstChild("HumanoidRootPart")
-                local h = char:FindFirstChild("Humanoid")
-                if not r or not h then return end
-                if h.FloorMaterial ~= Enum.Material.Air then
+                Logger.SafeCall("antiFall/Heartbeat", function()
+                    if not Vars.antiFallRunning then return end
+                    local r = char:FindFirstChild("HumanoidRootPart")
+                    local h = char:FindFirstChild("Humanoid")
+                    if not r or not h then return end
+                    if h.FloorMaterial ~= Enum.Material.Air then
+                        startY = nil
+                        return
+                    end
+                    if startY == nil then startY = r.Position.Y end
+                    if startY - r.Position.Y < 6.5 then return end
+                    local result = Vars.Workspace:Raycast(r.Position, V3(0, -300, 0), rayParams)
+                    if not result then return end
+                    r.AssemblyLinearVelocity = V3(0, 0, 0)
                     startY = nil
-                    return
-                end
-                if startY == nil then startY = r.Position.Y end
-                if startY - r.Position.Y < 6.5 then return end
-                local result = Vars.Workspace:Raycast(r.Position, V3(0, -300, 0), rayParams)
-                if not result then return end
-                r.AssemblyLinearVelocity = V3(0, 0, 0)
-                startY = nil
+                end)
             end)
             table_insert(Vars.antiFallCharConnections, stateConn)
             table_insert(Vars.antiFallCharConnections, heartbeatConn)
         end
         if LP.Character then setupChar(LP.Character) end
         Vars.antiFallConnection = LP.CharacterAdded:Connect(function(char)
-            task.wait(0.5)
-            if Vars.antiFallRunning then setupChar(char) end
+            Logger.SafeCall("antiFall/charAdded", function()
+                task.wait(0.5)
+                if Vars.antiFallRunning then setupChar(char) end
+            end)
         end)
     end
     Vars.StartAntiFall = StartAntiFall
@@ -3714,38 +3990,44 @@ do
         if Vars.strafeConnection then return end
         if not LP.Character then return end
         strafeLeftConn = UserInputService.InputBegan:Connect(function(input, gp)
-            if gp then return end
-            if input.KeyCode == Settings.Movement.StrafeKeyLeft then Vars.strafeKeyLeftHeld = true end
-            if input.KeyCode == Settings.Movement.StrafeKeyRight then Vars.strafeKeyRightHeld = true end
+            Logger.SafeCall("strafe/inputBegan", function()
+                if gp then return end
+                if input.KeyCode == Settings.Movement.StrafeKeyLeft then Vars.strafeKeyLeftHeld = true end
+                if input.KeyCode == Settings.Movement.StrafeKeyRight then Vars.strafeKeyRightHeld = true end
+            end)
         end)
         strafeLeftEndConn = UserInputService.InputEnded:Connect(function(input)
-            if input.KeyCode == Settings.Movement.StrafeKeyLeft then Vars.strafeKeyLeftHeld = false end
-            if input.KeyCode == Settings.Movement.StrafeKeyRight then Vars.strafeKeyRightHeld = false end
+            Logger.SafeCall("strafe/inputEnded", function()
+                if input.KeyCode == Settings.Movement.StrafeKeyLeft then Vars.strafeKeyLeftHeld = false end
+                if input.KeyCode == Settings.Movement.StrafeKeyRight then Vars.strafeKeyRightHeld = false end
+            end)
         end)
         Vars.strafeConnection = RunService.Heartbeat:Connect(function()
-            if Vars.isScriptUnloaded or not Settings.Movement.StrafeEnabled then return end
-            local char = LP.Character
-            if not char then return end
-            local h = char:FindFirstChildOfClass("Humanoid")
-            local root = char:FindFirstChild("HumanoidRootPart")
-            if not h or not root or not root:IsA("BasePart") then return end
-            local now = os_clock()
-            if (now - lastPeek) < Settings.Movement.PeekCooldown then return end
-            local strafeDir = 0
-            if Vars.strafeKeyLeftHeld then strafeDir = -1 end
-            if Vars.strafeKeyRightHeld then strafeDir = 1 end
-            if strafeDir ~= 0 then
-                local cam = Vars.GetCamera()
-                local camRight = cam.CFrame.RightVector
-                local offset = camRight * (strafeDir * Settings.Movement.StrafeDistance)
-                local newPos = root.Position + offset
-                if h.FloorMaterial == Enum.Material.Air or h.MoveDirection.Magnitude < 0.1 then
-                    pcall(function()
-                        root.CFrame = CFrame_new(newPos, newPos + cam.CFrame.LookVector)
-                    end)
-                    lastPeek = now
+            Logger.SafeCall("strafe/Heartbeat", function()
+                if Vars.isScriptUnloaded or not Settings.Movement.StrafeEnabled then return end
+                local char = LP.Character
+                if not char then return end
+                local h = char:FindFirstChildOfClass("Humanoid")
+                local root = char:FindFirstChild("HumanoidRootPart")
+                if not h or not root or not root:IsA("BasePart") then return end
+                local now = os_clock()
+                if (now - lastPeek) < Settings.Movement.PeekCooldown then return end
+                local strafeDir = 0
+                if Vars.strafeKeyLeftHeld then strafeDir = -1 end
+                if Vars.strafeKeyRightHeld then strafeDir = 1 end
+                if strafeDir ~= 0 then
+                    local cam = Vars.GetCamera()
+                    local camRight = cam.CFrame.RightVector
+                    local offset = camRight * (strafeDir * Settings.Movement.StrafeDistance)
+                    local newPos = root.Position + offset
+                    if h.FloorMaterial == Enum.Material.Air or h.MoveDirection.Magnitude < 0.1 then
+                        pcall(function()
+                            root.CFrame = CFrame_new(newPos, newPos + cam.CFrame.LookVector)
+                        end)
+                        lastPeek = now
+                    end
                 end
-            end
+            end)
         end)
     end
 
@@ -3758,7 +4040,7 @@ do
         if strafeLeftEndConn then pcall(function() strafeLeftEndConn:Disconnect() end); strafeLeftEndConn = nil end
     end
 
-    -- Spinbot (max 5000)
+    -- Spinbot
     local lastSpin = 0
     local spinAngle = 0
     Vars.StartExploitSpinbot = function()
@@ -3766,28 +4048,30 @@ do
         Vars.spinbotActive = true
         lastSpin = os_clock()
         Vars.spinbotConnection = RunService.RenderStepped:Connect(function()
-            if Vars.isScriptUnloaded or not Settings.Exploit.Spinbot then return end
-            local char = LP.Character
-            if not char then return end
-            local root = char:FindFirstChild("HumanoidRootPart")
-            if not root or not root:IsA("BasePart") then return end
-            local now = os_clock()
-            local delta = now - lastSpin
-            lastSpin = now
-            if delta > 0.5 then delta = 0.5 end
-            spinAngle = spinAngle + math_rad(Settings.Exploit.SpinbotSpeed) * delta
-            if spinAngle > math.pi * 2 then
-                spinAngle = spinAngle - math.pi * 2
-            end
-            pcall(function()
-                local currentPos = root.Position
-                local currentLook = root.CFrame.LookVector
-                local rotatedLook = V3(
-                    currentLook.X * math.cos(spinAngle) - currentLook.Z * math.sin(spinAngle),
-                    currentLook.Y,
-                    currentLook.X * math.sin(spinAngle) + currentLook.Z * math.cos(spinAngle)
-                )
-                root.CFrame = CFrame.lookAt(currentPos, currentPos + rotatedLook)
+            Logger.SafeCall("spinbot/RenderStepped", function()
+                if Vars.isScriptUnloaded or not Settings.Exploit.Spinbot then return end
+                local char = LP.Character
+                if not char then return end
+                local root = char:FindFirstChild("HumanoidRootPart")
+                if not root or not root:IsA("BasePart") then return end
+                local now = os_clock()
+                local delta = now - lastSpin
+                lastSpin = now
+                if delta > 0.5 then delta = 0.5 end
+                spinAngle = spinAngle + math_rad(Settings.Exploit.SpinbotSpeed) * delta
+                if spinAngle > math.pi * 2 then
+                    spinAngle = spinAngle - math.pi * 2
+                end
+                pcall(function()
+                    local currentPos = root.Position
+                    local currentLook = root.CFrame.LookVector
+                    local rotatedLook = V3(
+                        currentLook.X * math.cos(spinAngle) - currentLook.Z * math.sin(spinAngle),
+                        currentLook.Y,
+                        currentLook.X * math.sin(spinAngle) + currentLook.Z * math.cos(spinAngle)
+                    )
+                    root.CFrame = CFrame.lookAt(currentPos, currentPos + rotatedLook)
+                end)
             end)
         end)
     end
@@ -3800,9 +4084,7 @@ do
         end
     end
 
-    -- ============================================================
-    -- WALKSPEED arreglado (máx 5000, reconecta en CharacterAdded)
-    -- ============================================================
+    -- Walkspeed (máx 5000)
     local function ApplyWalkspeedTick()
         if Vars.isScriptUnloaded then return end
         if not Settings.Exploit.Walkspeed then return end
@@ -3820,20 +4102,24 @@ do
 
     Vars.StartExploitWalkspeed = function()
         if Vars.exploitWalkspeedConn then return end
-        Vars.exploitWalkspeedConn = RunService.Stepped:Connect(ApplyWalkspeedTick)
+        Vars.exploitWalkspeedConn = RunService.Stepped:Connect(function()
+            Logger.SafeCall("walkspeed/Stepped", ApplyWalkspeedTick)
+        end)
         if Vars.exploitWalkspeedCharConn then
             pcall(function() Vars.exploitWalkspeedCharConn:Disconnect() end)
         end
         Vars.exploitWalkspeedCharConn = LP.CharacterAdded:Connect(function(char)
-            task.wait(0.3)
-            if Settings.Exploit.Walkspeed then
-                local hum = char:FindFirstChildOfClass("Humanoid")
-                if hum then
-                    local target = Settings.Exploit.WalkspeedValue or 16
-                    if target > 5000 then target = 5000 end
-                    hum.WalkSpeed = target
+            Logger.SafeCall("walkspeed/charAdded", function()
+                task.wait(0.3)
+                if Settings.Exploit.Walkspeed then
+                    local hum = char:FindFirstChildOfClass("Humanoid")
+                    if hum then
+                        local target = Settings.Exploit.WalkspeedValue or 16
+                        if target > 5000 then target = 5000 end
+                        hum.WalkSpeed = target
+                    end
                 end
-            end
+            end)
         end)
     end
     Vars.StopExploitWalkspeed = function()
@@ -3862,18 +4148,22 @@ do
 
     Vars.StartExploitJumpPower = function()
         if Vars.exploitJumpConn then return end
-        Vars.exploitJumpConn = RunService.Stepped:Connect(ApplyJumpTick)
+        Vars.exploitJumpConn = RunService.Stepped:Connect(function()
+            Logger.SafeCall("jumpPower/Stepped", ApplyJumpTick)
+        end)
         if Vars.exploitJumpCharConn then
             pcall(function() Vars.exploitJumpCharConn:Disconnect() end)
         end
         Vars.exploitJumpCharConn = LP.CharacterAdded:Connect(function(char)
-            task.wait(0.3)
-            if Settings.Exploit.JumpPower then
-                local hum = char:FindFirstChildOfClass("Humanoid")
-                if hum then
-                    hum.JumpPower = Settings.Exploit.JumpPowerValue or 50
+            Logger.SafeCall("jumpPower/charAdded", function()
+                task.wait(0.3)
+                if Settings.Exploit.JumpPower then
+                    local hum = char:FindFirstChildOfClass("Humanoid")
+                    if hum then
+                        hum.JumpPower = Settings.Exploit.JumpPowerValue or 50
+                    end
                 end
-            end
+            end)
         end)
     end
     Vars.StopExploitJumpPower = function()
@@ -3890,14 +4180,16 @@ do
     Vars.StartExploitNoclip = function()
         if Vars.exploitNoclipConn then return end
         Vars.exploitNoclipConn = RunService.Stepped:Connect(function()
-            if not Settings.Exploit.Noclip then return end
-            local char = LP.Character
-            if not char then return end
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.CanCollide = false
+            Logger.SafeCall("noclip/Stepped", function()
+                if not Settings.Exploit.Noclip then return end
+                local char = LP.Character
+                if not char then return end
+                for _, part in ipairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.CanCollide = false
+                    end
                 end
-            end
+            end)
         end)
     end
     Vars.StopExploitNoclip = function()
@@ -3918,20 +4210,22 @@ do
     Vars.StartExploitFly = function()
         if Vars.exploitFlyConn then return end
         Vars.exploitFlyConn = RunService.Heartbeat:Connect(function()
-            if not Settings.Exploit.Fly then return end
-            local char = LP.Character
-            if not char then return end
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            local root = char:FindFirstChild("HumanoidRootPart")
-            if not hum or not root then return end
-            hum.WalkSpeed = 0
-            local cam = Vars.GetCamera()
-            if not cam then return end
-            local ctrl = Vars.exploitFlyControl
-            local direction = (cam.CFrame.LookVector * (ctrl.F + ctrl.B)
-                + cam.CFrame.RightVector * (ctrl.R + ctrl.L)).Unit
-            local vertical = V3(0, (ctrl.U + ctrl.D), 0)
-            root.AssemblyLinearVelocity = direction * Settings.Exploit.FlySpeed + vertical * Settings.Exploit.FlySpeed
+            Logger.SafeCall("fly/Heartbeat", function()
+                if not Settings.Exploit.Fly then return end
+                local char = LP.Character
+                if not char then return end
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                local root = char:FindFirstChild("HumanoidRootPart")
+                if not hum or not root then return end
+                hum.WalkSpeed = 0
+                local cam = Vars.GetCamera()
+                if not cam then return end
+                local ctrl = Vars.exploitFlyControl
+                local direction = (cam.CFrame.LookVector * (ctrl.F + ctrl.B)
+                    + cam.CFrame.RightVector * (ctrl.R + ctrl.L)).Unit
+                local vertical = V3(0, (ctrl.U + ctrl.D), 0)
+                root.AssemblyLinearVelocity = direction * Settings.Exploit.FlySpeed + vertical * Settings.Exploit.FlySpeed
+            end)
         end)
     end
     Vars.StopExploitFly = function()
@@ -3947,49 +4241,55 @@ do
     end
 
     Vars.exploitFlyKeyConn = UserInputService.InputBegan:Connect(function(input, gp)
-        if gp then return end
-        local c = Vars.exploitFlyControl
-        if input.KeyCode == Enum.KeyCode.W then c.F = 1
-        elseif input.KeyCode == Enum.KeyCode.S then c.B = -1
-        elseif input.KeyCode == Enum.KeyCode.A then c.L = -1
-        elseif input.KeyCode == Enum.KeyCode.D then c.R = 1
-        elseif input.KeyCode == Enum.KeyCode.Space then c.U = 1
-        elseif input.KeyCode == Enum.KeyCode.LeftControl then c.D = -1
-        end
+        Logger.SafeCall("flyKey/inputBegan", function()
+            if gp then return end
+            local c = Vars.exploitFlyControl
+            if input.KeyCode == Enum.KeyCode.W then c.F = 1
+            elseif input.KeyCode == Enum.KeyCode.S then c.B = -1
+            elseif input.KeyCode == Enum.KeyCode.A then c.L = -1
+            elseif input.KeyCode == Enum.KeyCode.D then c.R = 1
+            elseif input.KeyCode == Enum.KeyCode.Space then c.U = 1
+            elseif input.KeyCode == Enum.KeyCode.LeftControl then c.D = -1
+            end
+        end)
     end)
     Vars.exploitFlyKeyEndConn = UserInputService.InputEnded:Connect(function(input)
-        local c = Vars.exploitFlyControl
-        if input.KeyCode == Enum.KeyCode.W then c.F = 0
-        elseif input.KeyCode == Enum.KeyCode.S then c.B = 0
-        elseif input.KeyCode == Enum.KeyCode.A then c.L = 0
-        elseif input.KeyCode == Enum.KeyCode.D then c.R = 0
-        elseif input.KeyCode == Enum.KeyCode.Space then c.U = 0
-        elseif input.KeyCode == Enum.KeyCode.LeftControl then c.D = 0
-        end
+        Logger.SafeCall("flyKey/inputEnded", function()
+            local c = Vars.exploitFlyControl
+            if input.KeyCode == Enum.KeyCode.W then c.F = 0
+            elseif input.KeyCode == Enum.KeyCode.S then c.B = 0
+            elseif input.KeyCode == Enum.KeyCode.A then c.L = 0
+            elseif input.KeyCode == Enum.KeyCode.D then c.R = 0
+            elseif input.KeyCode == Enum.KeyCode.Space then c.U = 0
+            elseif input.KeyCode == Enum.KeyCode.LeftControl then c.D = 0
+            end
+        end)
     end)
 
     Vars.StartExploitTeleport = function()
         if Vars.exploitTeleportConn then return end
         Vars.exploitTeleportConn = UserInputService.InputBegan:Connect(function(input, gp)
-            if gp then return end
-            if not Settings.Exploit.TeleportToCursor then return end
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                local char = LP.Character
-                if not char then return end
-                local root = char:FindFirstChild("HumanoidRootPart")
-                if not root then return end
-                local cam = Vars.GetCamera()
-                if not cam then return end
-                local mp = UserInputService:GetMouseLocation()
-                local ray = cam:ViewportPointToRay(mp.X, mp.Y)
-                local params = RaycastParams.new()
-                params.FilterType = Enum.RaycastFilterType.Blacklist
-                params.FilterDescendantsInstances = {char}
-                local result = Vars.Workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
-                if result then
-                    root.CFrame = CFrame_new(result.Position + V3(0, 3, 0))
+            Logger.SafeCall("teleport/inputBegan", function()
+                if gp then return end
+                if not Settings.Exploit.TeleportToCursor then return end
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    local char = LP.Character
+                    if not char then return end
+                    local root = char:FindFirstChild("HumanoidRootPart")
+                    if not root then return end
+                    local cam = Vars.GetCamera()
+                    if not cam then return end
+                    local mp = UserInputService:GetMouseLocation()
+                    local ray = cam:ViewportPointToRay(mp.X, mp.Y)
+                    local params = RaycastParams.new()
+                    params.FilterType = Enum.RaycastFilterType.Blacklist
+                    params.FilterDescendantsInstances = {char}
+                    local result = Vars.Workspace:Raycast(ray.Origin, ray.Direction * 1000, params)
+                    if result then
+                        root.CFrame = CFrame_new(result.Position + V3(0, 3, 0))
+                    end
                 end
-            end
+            end)
         end)
     end
     Vars.StopExploitTeleport = function()
@@ -4112,7 +4412,7 @@ do
             if Settings.Advanced.FPSBooster_StreamingRadius then
                 task.spawn(function()
                     while Vars.fpsBoosterActive do
-                        pcall(function()
+                        Logger.SafeCall("fpsBooster/streaming", function()
                             sethiddenproperty(Workspace, "StreamingTargetRadius", 4)
                             sethiddenproperty(Workspace, "StreamingMinRadius", 2)
                         end)
@@ -4122,54 +4422,56 @@ do
             end
 
             task.spawn(function()
-                task.wait(0.1)
-                local targetMatName = Settings.Advanced.FPSBooster_MaterialTarget or "Plastic"
-                local targetMat = Enum.Material[targetMatName] or Enum.Material.Plastic
-                local count = 0
-                local maxChanges = 100000
+                Logger.SafeCall("fpsBooster/apply", function()
+                    task.wait(0.1)
+                    local targetMatName = Settings.Advanced.FPSBooster_MaterialTarget or "Plastic"
+                    local targetMat = Enum.Material[targetMatName] or Enum.Material.Plastic
+                    local count = 0
+                    local maxChanges = 100000
 
-                local ok, descendants = pcall(function()
-                    return Workspace:GetDescendants()
-                end)
-                if not ok or not descendants then return end
+                    local ok, descendants = pcall(function()
+                        return Workspace:GetDescendants()
+                    end)
+                    if not ok or not descendants then return end
 
-                for _, obj in ipairs(descendants) do
-                    if count >= maxChanges then break end
-                    if Vars.isScriptUnloaded or not Vars.fpsBoosterActive then break end
+                    for _, obj in ipairs(descendants) do
+                        if count >= maxChanges then break end
+                        if Vars.isScriptUnloaded or not Vars.fpsBoosterActive then break end
 
-                    if obj:IsA("BasePart") then
-                        if LP.Character and obj:IsDescendantOf(LP.Character) then
-                            continue
-                        end
-                        if Vars.fpsBoosterOriginalMaterials[obj] == nil then
-                            Vars.fpsBoosterOriginalMaterials[obj] = obj.Material
-                        end
-                        if Settings.Advanced.FPSBooster_Materials then
-                            pcall(function()
-                                obj.Material = targetMat
-                                obj.Reflectance = 0
-                            end)
-                        end
-                        if Settings.Advanced.FPSBooster_Shadows == false then
-                            pcall(function() obj.CastShadow = false end)
-                        end
-                        count = count + 1
-                    elseif Settings.Advanced.FPSBooster_RemoveEffects then
-                        if obj:IsA("Texture") or obj:IsA("Decal")
-                            or obj:IsA("ParticleEmitter") or obj:IsA("Trail")
-                            or obj:IsA("Beam") or obj:IsA("Fire")
-                            or obj:IsA("Smoke") or obj:IsA("Sparkles") then
-                            table_insert(Vars.fpsBoosterRemovedEffects, {
-                                instance = obj,
-                                parent = obj.Parent,
-                            })
-                            pcall(function() obj.Parent = nil end)
+                        if obj:IsA("BasePart") then
+                            if LP.Character and obj:IsDescendantOf(LP.Character) then
+                                continue
+                            end
+                            if Vars.fpsBoosterOriginalMaterials[obj] == nil then
+                                Vars.fpsBoosterOriginalMaterials[obj] = obj.Material
+                            end
+                            if Settings.Advanced.FPSBooster_Materials then
+                                pcall(function()
+                                    obj.Material = targetMat
+                                    obj.Reflectance = 0
+                                end)
+                            end
+                            if Settings.Advanced.FPSBooster_Shadows == false then
+                                pcall(function() obj.CastShadow = false end)
+                            end
                             count = count + 1
+                        elseif Settings.Advanced.FPSBooster_RemoveEffects then
+                            if obj:IsA("Texture") or obj:IsA("Decal")
+                                or obj:IsA("ParticleEmitter") or obj:IsA("Trail")
+                                or obj:IsA("Beam") or obj:IsA("Fire")
+                                or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+                                table_insert(Vars.fpsBoosterRemovedEffects, {
+                                    instance = obj,
+                                    parent = obj.Parent,
+                                })
+                                pcall(function() obj.Parent = nil end)
+                                count = count + 1
+                            end
                         end
                     end
-                end
 
-                Logger.Info("FPS Booster: " .. count .. " cambios aplicados")
+                    Logger.Info("FPS Booster: " .. count .. " cambios aplicados")
+                end)
             end)
 
             Logger.Info("FPS Booster ACTIVADO")
@@ -4362,28 +4664,34 @@ do
 
             if Settings.Advanced.Indicator_Draggable then
                 frame.InputBegan:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1
-                        or input.UserInputType == Enum.UserInputType.Touch then
-                        Vars.indicatorDragging = true
-                        Vars.indicatorDragStart = input.Position
-                        Vars.indicatorStartPos = frame.Position
-                    end
+                    Logger.SafeCall("indicator/dragBegan", function()
+                        if input.UserInputType == Enum.UserInputType.MouseButton1
+                            or input.UserInputType == Enum.UserInputType.Touch then
+                            Vars.indicatorDragging = true
+                            Vars.indicatorDragStart = input.Position
+                            Vars.indicatorStartPos = frame.Position
+                        end
+                    end)
                 end)
                 frame.InputChanged:Connect(function(input)
-                    if Vars.indicatorDragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-                        or input.UserInputType == Enum.UserInputType.Touch) then
-                        local delta = input.Position - Vars.indicatorDragStart
-                        frame.Position = UDim2.new(
-                            Vars.indicatorStartPos.X.Scale, Vars.indicatorStartPos.X.Offset + delta.X,
-                            Vars.indicatorStartPos.Y.Scale, Vars.indicatorStartPos.Y.Offset + delta.Y
-                        )
-                    end
+                    Logger.SafeCall("indicator/dragChanged", function()
+                        if Vars.indicatorDragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+                            or input.UserInputType == Enum.UserInputType.Touch) then
+                            local delta = input.Position - Vars.indicatorDragStart
+                            frame.Position = UDim2.new(
+                                Vars.indicatorStartPos.X.Scale, Vars.indicatorStartPos.X.Offset + delta.X,
+                                Vars.indicatorStartPos.Y.Scale, Vars.indicatorStartPos.Y.Offset + delta.Y
+                            )
+                        end
+                    end)
                 end)
                 UserInputService.InputEnded:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1
-                        or input.UserInputType == Enum.UserInputType.Touch then
-                        Vars.indicatorDragging = false
-                    end
+                    Logger.SafeCall("indicator/dragEnded", function()
+                        if input.UserInputType == Enum.UserInputType.MouseButton1
+                            or input.UserInputType == Enum.UserInputType.Touch then
+                            Vars.indicatorDragging = false
+                        end
+                    end)
                 end)
             end
             return sg
@@ -4431,61 +4739,66 @@ do
     end
 
     Vars.indicatorConn = RunService.RenderStepped:Connect(function()
-        if Vars.isScriptUnloaded then return end
-        pcall(UpdateIndicator)
+        Logger.SafeCall("indicator/RenderStepped", UpdateIndicator)
     end)
 
     Vars.camYConn = RunService.RenderStepped:Connect(function()
-        if Vars.isScriptUnloaded then return end
-        if not Settings.Advanced.CamY_Enabled then
-            if Vars.camYOriginal then
-                local cam = GetCamera()
-                if cam then cam.CFrame = Vars.camYOriginal end
-                Vars.camYOriginal = nil
+        Logger.SafeCall("camY/RenderStepped", function()
+            if Vars.isScriptUnloaded then return end
+            if not Settings.Advanced.CamY_Enabled then
+                if Vars.camYOriginal then
+                    local cam = GetCamera()
+                    if cam then cam.CFrame = Vars.camYOriginal end
+                    Vars.camYOriginal = nil
+                end
+                return
             end
-            return
-        end
-        local cam = GetCamera()
-        if not cam then return end
-        local offset = V3(0, Settings.Advanced.CamY_Offset, 0)
-        local pos = cam.CFrame.Position + offset
-        cam.CFrame = CFrame_new(pos, pos + cam.CFrame.LookVector)
+            local cam = GetCamera()
+            if not cam then return end
+            local offset = V3(0, Settings.Advanced.CamY_Offset, 0)
+            local pos = cam.CFrame.Position + offset
+            cam.CFrame = CFrame_new(pos, pos + cam.CFrame.LookVector)
+        end)
     end)
 
     Vars.cframeViewConn = RunService.RenderStepped:Connect(function()
-        if Vars.isScriptUnloaded then return end
-        if not Settings.Advanced.CFrameView_Enabled then return end
-        local char = LP.Character
-        if not char then return end
-        local root = char:FindFirstChild("HumanoidRootPart")
-        if not root then return end
-        local cam = GetCamera()
-        if not cam then return end
-        local offset = V3(0, 3, -12)
-        local newPos = root.CFrame:PointToWorldSpace(offset)
-        cam.CFrame = CFrame_new(newPos, root.Position + V3(0, 1, 0))
+        Logger.SafeCall("cframeView/RenderStepped", function()
+            if Vars.isScriptUnloaded then return end
+            if not Settings.Advanced.CFrameView_Enabled then return end
+            local char = LP.Character
+            if not char then return end
+            local root = char:FindFirstChild("HumanoidRootPart")
+            if not root then return end
+            local cam = GetCamera()
+            if not cam then return end
+            local offset = V3(0, 3, -12)
+            local newPos = root.CFrame:PointToWorldSpace(offset)
+            cam.CFrame = CFrame_new(newPos, root.Position + V3(0, 1, 0))
+        end)
     end)
 
     Vars.worldProximityConn = RunService.Heartbeat:Connect(function()
-        if Vars.isScriptUnloaded then return end
-        if not Settings.Advanced.WP_Enabled then return end
-        if Settings.Advanced.WP_MaxActivation <= 0 then return end
-        local count = 0
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if count >= Settings.Advanced.WP_MaxActivation then break end
-            if obj:IsA("ProximityPrompt") and obj.Enabled then
-                pcall(function()
-                    if Settings.Advanced.WP_HoldDuration > 0 then
-                        obj.HoldDuration = Settings.Advanced.WP_HoldDuration
-                    end
-                    if obj.MaxActivationDistance and Settings.Advanced.WP_MaxActivation > 0 then
-                        obj.MaxActivationDistance = Settings.Advanced.WP_MaxActivation
-                    end
-                    if fireproximityprompt then fireproximityprompt(obj) end
-                end)
-                count = count + 1
+        Logger.SafeCall("worldProximity/Heartbeat", function()
+            if Vars.isScriptUnloaded then return end
+            if not Settings.Advanced.WP_Enabled then return end
+            if Settings.Advanced.WP_MaxActivation <= 0 then return end
+            local count = 0
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if count >= Settings.Advanced.WP_MaxActivation then break end
+                if obj:IsA("ProximityPrompt") and obj.Enabled then
+                    pcall(function()
+                        if Settings.Advanced.WP_HoldDuration > 0 then
+                            obj.HoldDuration = Settings.Advanced.WP_HoldDuration
+                        end
+                        if obj.MaxActivationDistance and Settings.Advanced.WP_MaxActivation > 0 then
+                            obj.MaxActivationDistance = Settings.Advanced.WP_MaxActivation
+                        end
+                        if fireproximityprompt then fireproximityprompt(obj) end
+                    end)
+                    count = count + 1
+                end
             end
-        end
+        end)
     end)
 
     local function ApplyWorldXray(state)
@@ -4522,29 +4835,31 @@ do
     Vars.ApplyWorldXray = ApplyWorldXray
 
     Vars.loopFireConn = RunService.Heartbeat:Connect(function()
-        if Vars.isScriptUnloaded then return end
-        if not Settings.Advanced.LF_Enabled then return end
-        local fireType = Settings.Advanced.LF_Type
-        local interval = math.max(Settings.Advanced.LF_Interval, 0.1)
-        local now = os_clock()
-        if Vars.loopFireLast and (now - Vars.loopFireLast) < interval then return end
-        Vars.loopFireLast = now
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if fireType == "TouchInterest" and obj:IsA("BasePart") then
-                local touch = obj:FindFirstChildOfClass("TouchTransmitter")
-                if touch and firetouchinterest and LP.Character then
-                    local hrp = LP.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp then
-                        pcall(function() firetouchinterest(hrp, obj, 0) end)
-                        pcall(function() firetouchinterest(hrp, obj, 1) end)
+        Logger.SafeCall("loopFire/Heartbeat", function()
+            if Vars.isScriptUnloaded then return end
+            if not Settings.Advanced.LF_Enabled then return end
+            local fireType = Settings.Advanced.LF_Type
+            local interval = math.max(Settings.Advanced.LF_Interval, 0.1)
+            local now = os_clock()
+            if Vars.loopFireLast and (now - Vars.loopFireLast) < interval then return end
+            Vars.loopFireLast = now
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if fireType == "TouchInterest" and obj:IsA("BasePart") then
+                    local touch = obj:FindFirstChildOfClass("TouchTransmitter")
+                    if touch and firetouchinterest and LP.Character then
+                        local hrp = LP.Character:FindFirstChild("HumanoidRootPart")
+                        if hrp then
+                            pcall(function() firetouchinterest(hrp, obj, 0) end)
+                            pcall(function() firetouchinterest(hrp, obj, 1) end)
+                        end
                     end
+                elseif fireType == "ClickDetector" and obj:IsA("ClickDetector") then
+                    if fireclickdetector then pcall(function() fireclickdetector(obj) end) end
+                elseif fireType == "ProximityPrompt" and obj:IsA("ProximityPrompt") then
+                    if fireproximityprompt then pcall(function() fireproximityprompt(obj) end) end
                 end
-            elseif fireType == "ClickDetector" and obj:IsA("ClickDetector") then
-                if fireclickdetector then pcall(function() fireclickdetector(obj) end) end
-            elseif fireType == "ProximityPrompt" and obj:IsA("ProximityPrompt") then
-                if fireproximityprompt then pcall(function() fireproximityprompt(obj) end) end
             end
-        end
+        end)
     end)
 
     local function ApplyTruss(state)
@@ -4568,14 +4883,16 @@ do
     Vars.ApplyTruss = ApplyTruss
 
     Vars.trussConn = RunService.Heartbeat:Connect(function()
-        if Vars.isScriptUnloaded then return end
-        if not Settings.Advanced.Truss_Enabled then return end
-        if not Vars.trussPart or not Vars.trussPart.Parent then return end
-        local char = LP.Character
-        if not char then return end
-        local root = char:FindFirstChild("HumanoidRootPart")
-        if not root then return end
-        Vars.trussPart.CFrame = root.CFrame * CFrame_new(0, 0, -1.5)
+        Logger.SafeCall("truss/Heartbeat", function()
+            if Vars.isScriptUnloaded then return end
+            if not Settings.Advanced.Truss_Enabled then return end
+            if not Vars.trussPart or not Vars.trussPart.Parent then return end
+            local char = LP.Character
+            if not char then return end
+            local root = char:FindFirstChild("HumanoidRootPart")
+            if not root then return end
+            Vars.trussPart.CFrame = root.CFrame * CFrame_new(0, 0, -1.5)
+        end)
     end)
 
     local function ApplyAirwalk(state)
@@ -4600,14 +4917,16 @@ do
     Vars.ApplyAirwalk = ApplyAirwalk
 
     Vars.airwalkConn = RunService.Heartbeat:Connect(function()
-        if Vars.isScriptUnloaded then return end
-        if not Settings.Advanced.Airwalk_Enabled then return end
-        if not Vars.airwalkPart or not Vars.airwalkPart.Parent then return end
-        local char = LP.Character
-        if not char then return end
-        local root = char:FindFirstChild("HumanoidRootPart")
-        if not root then return end
-        Vars.airwalkPart.CFrame = root.CFrame + V3(0, -4, 0)
+        Logger.SafeCall("airwalk/Heartbeat", function()
+            if Vars.isScriptUnloaded then return end
+            if not Settings.Advanced.Airwalk_Enabled then return end
+            if not Vars.airwalkPart or not Vars.airwalkPart.Parent then return end
+            local char = LP.Character
+            if not char then return end
+            local root = char:FindFirstChild("HumanoidRootPart")
+            if not root then return end
+            Vars.airwalkPart.CFrame = root.CFrame + V3(0, -4, 0)
+        end)
     end)
 
     local function ApplyAutorespawn(state)
@@ -4622,21 +4941,25 @@ do
                 local root = char:WaitForChild("HumanoidRootPart", 5)
                 if not hum or not root then return end
                 Vars.autorespawnConns.died = hum.Died:Connect(function()
-                    if Settings.Advanced.Autorespawn_Enabled then
-                        Vars.autorespawnDeathPos = root.CFrame
-                    end
+                    Logger.SafeCall("autorespawn/died", function()
+                        if Settings.Advanced.Autorespawn_Enabled then
+                            Vars.autorespawnDeathPos = root.CFrame
+                        end
+                    end)
                 end)
             end
             if LP.Character then setupChar(LP.Character) end
             Vars.autorespawnConns.added = LP.CharacterAdded:Connect(function(char)
-                if not Settings.Advanced.Autorespawn_Enabled then return end
-                task.wait(0.3)
-                if Vars.autorespawnDeathPos then
-                    local root = char:WaitForChild("HumanoidRootPart", 5)
-                    if root then root.CFrame = Vars.autorespawnDeathPos end
-                    Vars.autorespawnDeathPos = nil
-                end
-                setupChar(char)
+                Logger.SafeCall("autorespawn/charAdded", function()
+                    if not Settings.Advanced.Autorespawn_Enabled then return end
+                    task.wait(0.3)
+                    if Vars.autorespawnDeathPos then
+                        local root = char:WaitForChild("HumanoidRootPart", 5)
+                        if root then root.CFrame = Vars.autorespawnDeathPos end
+                        Vars.autorespawnDeathPos = nil
+                    end
+                    setupChar(char)
+                end)
             end)
         else
             for _, conn in pairs(Vars.autorespawnConns) do
@@ -4689,23 +5012,25 @@ do
     Vars.ApplyFlight = ApplyFlight
 
     Vars.flightConn = RunService.Heartbeat:Connect(function()
-        if Vars.isScriptUnloaded then return end
-        if not Settings.Advanced.Flight_Enabled then return end
-        if not Vars.flightBodyVelocity or not Vars.flightBodyGyro then return end
-        local cam = GetCamera()
-        if not cam then return end
-        local ctrl = Vars.exploitFlyControl
-        local spd = Settings.Advanced.Flight_Speed
-        local look = cam.CFrame.LookVector
-        local right = cam.CFrame.RightVector
-        local dir = look * (ctrl.F + ctrl.B) + right * (ctrl.R + ctrl.L)
-        local up = (ctrl.U + ctrl.D)
-        if dir.Magnitude > 0.01 then
-            Vars.flightBodyVelocity.Velocity = dir.Unit * spd + V3(0, up * spd, 0)
-        else
-            Vars.flightBodyVelocity.Velocity = V3(0, up * spd, 0)
-        end
-        Vars.flightBodyGyro.CFrame = cam.CFrame
+        Logger.SafeCall("flight/Heartbeat", function()
+            if Vars.isScriptUnloaded then return end
+            if not Settings.Advanced.Flight_Enabled then return end
+            if not Vars.flightBodyVelocity or not Vars.flightBodyGyro then return end
+            local cam = GetCamera()
+            if not cam then return end
+            local ctrl = Vars.exploitFlyControl
+            local spd = Settings.Advanced.Flight_Speed
+            local look = cam.CFrame.LookVector
+            local right = cam.CFrame.RightVector
+            local dir = look * (ctrl.F + ctrl.B) + right * (ctrl.R + ctrl.L)
+            local up = (ctrl.U + ctrl.D)
+            if dir.Magnitude > 0.01 then
+                Vars.flightBodyVelocity.Velocity = dir.Unit * spd + V3(0, up * spd, 0)
+            else
+                Vars.flightBodyVelocity.Velocity = V3(0, up * spd, 0)
+            end
+            Vars.flightBodyGyro.CFrame = cam.CFrame
+        end)
     end)
 
     Vars.CleanupAdvanced = function()
@@ -4986,18 +5311,22 @@ do
                 c2.Parent = btn
 
                 btn.MouseButton1Click:Connect(function()
-                    local newState = not item.get()
-                    item.set(newState)
-                    btn.BackgroundColor3 = newState and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(180, 0, 0)
+                    Logger.SafeCall("qt/click", function()
+                        local newState = not item.get()
+                        item.set(newState)
+                        btn.BackgroundColor3 = newState and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(180, 0, 0)
+                    end)
                 end)
 
                 task.spawn(function()
                     while btn.Parent and not Vars.isScriptUnloaded do
-                        local cur = item.get()
-                        local expected = cur and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(180, 0, 0)
-                        if btn.BackgroundColor3 ~= expected then
-                            btn.BackgroundColor3 = expected
-                        end
+                        Logger.SafeCall("qt/colorUpdate", function()
+                            local cur = item.get()
+                            local expected = cur and Color3.fromRGB(0, 180, 0) or Color3.fromRGB(180, 0, 0)
+                            if btn.BackgroundColor3 ~= expected then
+                                btn.BackgroundColor3 = expected
+                            end
+                        end)
                         task.wait(0.3)
                     end
                 end)
@@ -5006,28 +5335,34 @@ do
             if Settings.Advanced.QT_Draggable then
                 local dragging, dragStart, startPos
                 main.InputBegan:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1
-                        or input.UserInputType == Enum.UserInputType.Touch then
-                        dragging = true
-                        dragStart = input.Position
-                        startPos = main.Position
-                    end
+                    Logger.SafeCall("qt/dragBegan", function()
+                        if input.UserInputType == Enum.UserInputType.MouseButton1
+                            or input.UserInputType == Enum.UserInputType.Touch then
+                            dragging = true
+                            dragStart = input.Position
+                            startPos = main.Position
+                        end
+                    end)
                 end)
                 main.InputChanged:Connect(function(input)
-                    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-                        or input.UserInputType == Enum.UserInputType.Touch) then
-                        local delta = input.Position - dragStart
-                        main.Position = UDim2.new(
-                            startPos.X.Scale, startPos.X.Offset + delta.X,
-                            startPos.Y.Scale, startPos.Y.Offset + delta.Y
-                        )
-                    end
+                    Logger.SafeCall("qt/dragChanged", function()
+                        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+                            or input.UserInputType == Enum.UserInputType.Touch) then
+                            local delta = input.Position - dragStart
+                            main.Position = UDim2.new(
+                                startPos.X.Scale, startPos.X.Offset + delta.X,
+                                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+                            )
+                        end
+                    end)
                 end)
                 UserInputService.InputEnded:Connect(function(input)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1
-                        or input.UserInputType == Enum.UserInputType.Touch then
-                        dragging = false
-                    end
+                    Logger.SafeCall("qt/dragEnded", function()
+                        if input.UserInputType == Enum.UserInputType.MouseButton1
+                            or input.UserInputType == Enum.UserInputType.Touch then
+                            dragging = false
+                        end
+                    end)
                 end)
             end
 
@@ -5041,18 +5376,20 @@ do
     end
 
     Vars.qtConn = RunService.Heartbeat:Connect(function()
-        if Vars.isScriptUnloaded then return end
-        if not Settings.Advanced.QT_Enabled then
-            if Vars.quickTogglesGui and Vars.quickTogglesGui.Enabled then
-                Vars.quickTogglesGui.Enabled = false
+        Logger.SafeCall("qt/Heartbeat", function()
+            if Vars.isScriptUnloaded then return end
+            if not Settings.Advanced.QT_Enabled then
+                if Vars.quickTogglesGui and Vars.quickTogglesGui.Enabled then
+                    Vars.quickTogglesGui.Enabled = false
+                end
+                return
             end
-            return
-        end
-        if not Vars.quickTogglesGui or not Vars.quickTogglesGui.Parent then
-            CreateQuickToggles()
-        elseif not Vars.quickTogglesGui.Enabled then
-            Vars.quickTogglesGui.Enabled = true
-        end
+            if not Vars.quickTogglesGui or not Vars.quickTogglesGui.Parent then
+                CreateQuickToggles()
+            elseif not Vars.quickTogglesGui.Enabled then
+                Vars.quickTogglesGui.Enabled = true
+            end
+        end)
     end)
 end
 
@@ -5066,7 +5403,7 @@ do
     local LP = Vars.LP
 
     local Window = ScryuxUI:CreateWindow({
-        Title = "Town Complete v9.9.8",
+        Title = "Town Complete v9.10",
         Size = UDim2.new(0, 800, 0, 680),
         Keybind = Settings.Hotkeys.ToggleMenu,
         Theme = "Dark",
@@ -5090,87 +5427,89 @@ do
     local ESPTab = Window:CreateTab("ESP")
     local ESPMain = ESPTab:CreateSection("ESP")
     ESPMain:CreateToggle({ Text = "ESP Master", Default = false, Index = "ESP_Enabled",
-        Callback = function(v) Settings.ESP.Enabled = v end })
+        Callback = function(v) Logger.SafeCall("UI/ESP_Master", function() Settings.ESP.Enabled = v end) end })
     ESPMain:CreateToggle({ Text = "Box", Default = false, Index = "ESP_Box",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/ESP_Box", function()
             Settings.ESP.Box = v
             if not v then
                 for _, esp in pairs(Vars.ESPPool) do esp.box.Visible = false end
             end
-        end })
+        end) end })
     ESPMain:CreateSlider({ Text = "Box Thickness", Min = 1, Max = 5, Default = 1, Index = "ESP_BoxThickness",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/ESP_BoxThickness", function()
             Settings.ESP.BoxThickness = v
             for _, esp in pairs(Vars.ESPPool) do esp.box.Thickness = v end
-        end })
+        end) end })
     ESPMain:CreateSlider({ Text = "Box Padding", Min = 0, Max = 3, Default = 0.5, Index = "ESP_BoxPadding",
-        Callback = function(v) Settings.ESP.BoxPadding = v end })
+        Callback = function(v) Logger.SafeCall("UI/ESP_BoxPadding", function() Settings.ESP.BoxPadding = v end) end })
 
     local ESPInfo = ESPTab:CreateSection("Info")
     ESPInfo:CreateToggle({ Text = "Health Bar", Default = false, Index = "ESP_Health",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/ESP_Health", function()
             Settings.ESP.ShowHealth = v
             if not v then
                 for _, esp in pairs(Vars.ESPPool) do esp.health.Visible = false end
             end
-        end })
+        end) end })
     ESPInfo:CreateToggle({ Text = "Names", Default = false, Index = "ESP_Names",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/ESP_Names", function()
             Settings.ESP.ShowName = v
             if not v then
                 for _, esp in pairs(Vars.ESPPool) do esp.name.Visible = false end
             end
-        end })
+        end) end })
     ESPInfo:CreateToggle({ Text = "Show Distance", Default = false, Index = "ESP_Distance",
-        Callback = function(v) Settings.ESP.ShowDistance = v end })
+        Callback = function(v) Logger.SafeCall("UI/ESP_Distance", function() Settings.ESP.ShowDistance = v end) end })
     ESPInfo:CreateToggle({ Text = "Head Dots", Default = false, Index = "ESP_HeadDots",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/ESP_HeadDots", function()
             Settings.ESP.HeadDots = v
             if not v then
                 for _, esp in pairs(Vars.ESPPool) do
                     if esp.headDot then esp.headDot.Visible = false end
                 end
             end
-        end })
+        end) end })
     ESPInfo:CreateColorpicker({ Text = "Head Dot Color", Default = Color3.fromRGB(255, 255, 0), Index = "ESP_HeadDotColor",
-        Callback = function(c) Settings.ESP.HeadDotColor = c end })
+        Callback = function(c) Logger.SafeCall("UI/ESP_HeadDotColor", function() Settings.ESP.HeadDotColor = c end) end })
     ESPInfo:CreateSlider({ Text = "Head Dot Radius", Min = 1, Max = 15, Default = 5, Index = "ESP_HeadDotRadius",
-        Callback = function(v) Settings.ESP.HeadDotRadius = v end })
+        Callback = function(v) Logger.SafeCall("UI/ESP_HeadDotRadius", function() Settings.ESP.HeadDotRadius = v end) end })
 
     ESPInfo:CreateToggle({ Text = "Items", Default = false, Index = "ESP_Items",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/ESP_Items", function()
             Settings.ESP.Items = v
             if v then
                 task.spawn(function()
-                    task.wait(0.1)
-                    local count = 0
-                    local maxItems = Settings.ESP.ItemMaxCount or 100
-                    local ok, descendants = pcall(function()
-                        return Vars.Workspace:GetDescendants()
-                    end)
-                    if not ok or not descendants then return end
-                    for _, part in ipairs(descendants) do
-                        if count >= maxItems then break end
-                        if part:IsA("BasePart") and Vars.IsItemPart(part) then
-                            local success = pcall(Vars.CreateItemESP, part)
-                            if success then count = count + 1 end
+                    Logger.SafeCall("ESP/ItemsScan", function()
+                        task.wait(0.1)
+                        local count = 0
+                        local maxItems = Settings.ESP.ItemMaxCount or 100
+                        local ok, descendants = pcall(function()
+                            return Vars.Workspace:GetDescendants()
+                        end)
+                        if not ok or not descendants then return end
+                        for _, part in ipairs(descendants) do
+                            if count >= maxItems then break end
+                            if part:IsA("BasePart") and Vars.IsItemPart(part) then
+                                local success = pcall(Vars.CreateItemESP, part)
+                                if success then count = count + 1 end
+                            end
                         end
-                    end
-                    Logger.Info("Items ESP: " .. count .. " items")
+                        Logger.Info("Items ESP: " .. count .. " items")
+                    end)
                 end)
             else
                 Vars.ClearItemESP()
             end
-        end })
+        end) end })
     ESPInfo:CreateColorpicker({ Text = "Item Color", Default = Color3.fromRGB(255, 165, 0), Index = "ESP_ItemColor",
-        Callback = function(c) Settings.ESP.ItemColor = c end })
+        Callback = function(c) Logger.SafeCall("UI/ESP_ItemColor", function() Settings.ESP.ItemColor = c end) end })
     ESPInfo:CreateSlider({ Text = "Item Max Distance", Min = 50, Max = 2000, Default = 500, Index = "ESP_ItemMaxDist",
-        Callback = function(v) Settings.ESP.ItemMaxDistance = v end })
+        Callback = function(v) Logger.SafeCall("UI/ESP_ItemMaxDist", function() Settings.ESP.ItemMaxDistance = v end) end })
     ESPInfo:CreateSlider({ Text = "Item Max Count", Min = 10, Max = 500, Default = 100, Index = "ESP_ItemMaxCount",
-        Callback = function(v) Settings.ESP.ItemMaxCount = math.floor(v) end })
+        Callback = function(v) Logger.SafeCall("UI/ESP_ItemMaxCount", function() Settings.ESP.ItemMaxCount = math.floor(v) end) end })
 
     ESPInfo:CreateToggle({ Text = "Weapons", Default = false, Index = "ESP_Weapons",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/ESP_Weapons", function()
             Settings.ESP.Weapons = v
             if not v then
                 for _, esp in pairs(Vars.ESPPool) do
@@ -5179,30 +5518,30 @@ do
                     end)
                 end
             end
-        end })
+        end) end })
     ESPInfo:CreateColorpicker({ Text = "Weapon Color", Default = Color3.fromRGB(255, 0, 255), Index = "ESP_WeaponColor",
-        Callback = function(c) Settings.ESP.WeaponColor = c end })
+        Callback = function(c) Logger.SafeCall("UI/ESP_WeaponColor", function() Settings.ESP.WeaponColor = c end) end })
     ESPInfo:CreateToggle({ Text = "ESP Color By Health", Default = false, Index = "ESP_ColorByHealth",
-        Callback = function(v) Settings.ESP.ColorByHealth = v end })
+        Callback = function(v) Logger.SafeCall("UI/ESP_ColorByHealth", function() Settings.ESP.ColorByHealth = v end) end })
 
     local ESPChams = ESPTab:CreateSection("Chams")
     ESPChams:CreateToggle({ Text = "Chams", Default = false, Index = "ESP_Chams",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/ESP_Chams", function()
             Settings.ESP.Chams = v
             if not v then
                 for _, esp in pairs(Vars.ESPPool) do esp.chams.Enabled = false end
             end
-        end })
+        end) end })
     ESPChams:CreateSlider({ Text = "Chams Fill Transparency", Min = 0, Max = 1, Default = 0.25, Index = "ESP_ChamsFill",
-        Callback = function(v) Settings.ESP.ChamsFillTransparency = v end })
+        Callback = function(v) Logger.SafeCall("UI/ESP_ChamsFill", function() Settings.ESP.ChamsFillTransparency = v end) end })
     ESPChams:CreateSlider({ Text = "Chams Outline Transparency", Min = 0, Max = 1, Default = 0, Index = "ESP_ChamsOutlineTransp",
-        Callback = function(v) Settings.ESP.ChamsOutlineTransparency = v end })
+        Callback = function(v) Logger.SafeCall("UI/ESP_ChamsOutlineTransp", function() Settings.ESP.ChamsOutlineTransparency = v end) end })
     ESPChams:CreateDropdown({ Text = "Chams Depth Mode", Options = {"AlwaysOnTop", "Occluded"}, Default = "AlwaysOnTop", Index = "ESP_ChamsDepth",
-        Callback = function(v) Settings.ESP.ChamsDepthMode = v end })
+        Callback = function(v) Logger.SafeCall("UI/ESP_ChamsDepth", function() Settings.ESP.ChamsDepthMode = v end) end })
     ESPChams:CreateColorpicker({ Text = "Chams Outline Color", Default = Color3.new(1, 1, 1), Index = "ESP_ChamsOutlineColor",
-        Callback = function(c) Settings.ESP.ChamsOutlineColor = c end })
+        Callback = function(c) Logger.SafeCall("UI/ESP_ChamsOutlineColor", function() Settings.ESP.ChamsOutlineColor = c end) end })
     ESPChams:CreateToggle({ Text = "Wallcheck Chams", Default = false, Index = "ESP_WallcheckChams",
-        Callback = function(v) Settings.ESP.WallcheckChams = v end })
+        Callback = function(v) Logger.SafeCall("UI/ESP_WallcheckChams", function() Settings.ESP.WallcheckChams = v end) end })
 
     -- ============================================================
     -- Skeleton Tab
@@ -5210,26 +5549,26 @@ do
     local SkeletonTab = Window:CreateTab("Skeleton")
     local SkelMain = SkeletonTab:CreateSection("Skeleton ESP")
     SkelMain:CreateToggle({ Text = "Skeleton Master", Default = false, Index = "Skel_Enabled",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Skel_Enabled", function()
             Settings.Skeleton.Enabled = v
             if not v then Vars.ClearAllSkeletons() end
-        end })
+        end) end })
     SkelMain:CreateSlider({ Text = "Thickness", Min = 1, Max = 5, Default = 1, Index = "Skel_Thickness",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Skel_Thickness", function()
             Settings.Skeleton.Thickness = v
             for _, data in pairs(Vars.ActiveSkeletons) do
                 for _, line in ipairs(data.lines) do line.Thickness = v end
             end
-        end })
+        end) end })
     SkelMain:CreateSlider({ Text = "Max Distance", Min = 50, Max = 2000, Default = 500, Index = "Skel_MaxDist",
-        Callback = function(v) Settings.Skeleton.MaxDistance = v end })
+        Callback = function(v) Logger.SafeCall("UI/Skel_MaxDist", function() Settings.Skeleton.MaxDistance = v end) end })
     SkelMain:CreateDropdown({ Text = "Rig Mode", Options = {"Auto", "R6", "R15"}, Default = "Auto", Index = "Skel_RigMode",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Skel_RigMode", function()
             Settings.Skeleton.RigMode = v
             Vars.ClearAllSkeletons()
-        end })
+        end) end })
     SkelMain:CreateToggle({ Text = "Only Visible", Default = false, Index = "Skel_OnlyVisible",
-        Callback = function(v) Settings.Skeleton.OnlyVisible = v end })
+        Callback = function(v) Logger.SafeCall("UI/Skel_OnlyVisible", function() Settings.Skeleton.OnlyVisible = v end) end })
 
     -- ============================================================
     -- Aimbot Tab
@@ -5237,206 +5576,207 @@ do
     local AimbotTab = Window:CreateTab("Aimbot")
     local ASet = AimbotTab:CreateSection("Aimbot")
     ASet:CreateToggle({ Text = "Aimbot Master", Default = false, Index = "Aim_Enabled",
-        Callback = function(v) Settings.Aimbot.Enabled = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_Enabled", function() Settings.Aimbot.Enabled = v end) end })
     ASet:CreateDropdown({ Text = "Method", Options = {"Camera","Mouse"}, Default = "Camera", Index = "Aim_Method",
-        Callback = function(v) Settings.Aimbot.Method = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_Method", function() Settings.Aimbot.Method = v end) end })
     ASet:CreateDropdown({ Text = "Priority", Options = {"FOV","Distance","Priority"}, Default = "FOV", Index = "Aim_Priority",
-        Callback = function(v) Settings.Aimbot.Priority = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_Priority", function() Settings.Aimbot.Priority = v end) end })
     ASet:CreateToggle({ Text = "Wall Check", Default = false, Index = "Aim_WallCheck",
-        Callback = function(v) Settings.Aimbot.WallCheck = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_WallCheck", function() Settings.Aimbot.WallCheck = v end) end })
     ASet:CreateToggle({ Text = "Strict Walls", Default = false, Index = "Aim_StrictWalls",
-        Callback = function(v) Settings.Aimbot.StrictWallCheck = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_StrictWalls", function() Settings.Aimbot.StrictWallCheck = v end) end })
     ASet:CreateToggle({ Text = "Team Check", Default = false, Index = "Aim_TeamCheck",
-        Callback = function(v) Settings.Aimbot.TeamCheck = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_TeamCheck", function() Settings.Aimbot.TeamCheck = v end) end })
     ASet:CreateToggle({ Text = "Ignore Passive", Default = false, Index = "Aim_IgnorePassive",
-        Callback = function(v) Settings.Aimbot.IgnorePassive = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_IgnorePassive", function() Settings.Aimbot.IgnorePassive = v end) end })
     ASet:CreateToggle({ Text = "Require Gun", Default = false, Index = "Aim_RequireGun",
-        Callback = function(v) Settings.Aimbot.RequireGun = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_RequireGun", function() Settings.Aimbot.RequireGun = v end) end })
     ASet:CreateSlider({ Text = "Max Distance", Min = 50, Max = 2000, Default = 500, Index = "Aim_MaxDist",
-        Callback = function(v) Settings.Aimbot.MaxDistance = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_MaxDist", function() Settings.Aimbot.MaxDistance = v end) end })
     ASet:CreateDropdown({ Text = "Aim Key Type", Options = {"Mouse","Key"}, Default = "Mouse", Index = "Aim_KeyType",
-        Callback = function(v) Settings.Aimbot.AimKeyType = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_KeyType", function() Settings.Aimbot.AimKeyType = v end) end })
     ASet:CreateDropdown({ Text = "Aim Key", Options = {"T","Q","E","R","F","G","Z","X","C","V"}, Default = "T", Index = "Aim_Key",
-        Callback = function(v) if Enum.KeyCode[v] then Settings.Aimbot.AimKey = Enum.KeyCode[v] end end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_Key", function() if Enum.KeyCode[v] then Settings.Aimbot.AimKey = Enum.KeyCode[v] end end) end })
     ASet:CreateDropdown({ Text = "Mouse Button", Options = {"Left","Right","Middle"}, Default = "Right", Index = "Aim_MouseBtn",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Aim_MouseBtn", function()
             if v == "Left" then Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton1
             elseif v == "Right" then Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton2
             else Settings.Aimbot.AimMouseButton = Enum.UserInputType.MouseButton3 end
-        end })
+        end) end })
     ASet:CreateSlider({ Text = "FOV", Min = 1, Max = 360, Default = 180, Index = "Aim_FOV",
-        Callback = function(v) Settings.Aimbot.FOV = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_FOV", function() Settings.Aimbot.FOV = v end) end })
     ASet:CreateToggle({ Text = "Show FOV Circle", Default = false, Index = "Aim_ShowFOV",
-        Callback = function(v) Settings.Aimbot.ShowFOV = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_ShowFOV", function() Settings.Aimbot.ShowFOV = v end) end })
     ASet:CreateSlider({ Text = "Smoothness Base (0=snap, 1=smooth)", Min = 0, Max = 100, Default = 15, Index = "Aim_SmoothBase",
-        Callback = function(v) Settings.Aimbot.BaseSmoothness = v / 100 end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_SmoothBase", function() Settings.Aimbot.BaseSmoothness = v / 100 end) end })
     ASet:CreateSlider({ Text = "Smoothness Helper", Min = 0, Max = 100, Default = 15, Index = "Aim_SmoothHelper",
-        Callback = function(v) Settings.Aimbot.HelperSmoothness = v / 100 end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_SmoothHelper", function() Settings.Aimbot.HelperSmoothness = v / 100 end) end })
     ASet:CreateToggle({ Text = "Prediction", Default = false, Index = "Aim_Prediction",
-        Callback = function(v) Settings.Aimbot.UsePrediction = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_Prediction", function() Settings.Aimbot.UsePrediction = v end) end })
     ASet:CreateSlider({ Text = "Prediction Amount", Min = 0.01, Max = 0.3, Default = 0.13, Index = "Aim_PredAmount",
-        Callback = function(v) Settings.Aimbot.PredictionAmount = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_PredAmount", function() Settings.Aimbot.PredictionAmount = v end) end })
     ASet:CreateToggle({ Text = "Use Ping Prediction", Default = false, Index = "Aim_PingPrediction",
-        Callback = function(v) Settings.Aimbot.UsePingPrediction = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_PingPrediction", function() Settings.Aimbot.UsePingPrediction = v end) end })
     ASet:CreateToggle({ Text = "Anti-360", Default = false, Index = "Aim_Anti360",
-        Callback = function(v) Settings.Aimbot.Anti360.Enabled = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_Anti360", function() Settings.Aimbot.Anti360.Enabled = v end) end })
     ASet:CreateToggle({ Text = "Sticky Target Lock", Default = false, Index = "Aim_StickyLock",
-        Callback = function(v) Settings.Aimbot.StickyLock = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_StickyLock", function() Settings.Aimbot.StickyLock = v end) end })
     ASet:CreateSlider({ Text = "Sticky Timeout (s)", Min = 0.5, Max = 10, Default = 2, Index = "Aim_StickyTimeout",
-        Callback = function(v) Settings.Aimbot.StickyTimeout = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_StickyTimeout", function() Settings.Aimbot.StickyTimeout = v end) end })
 
-    -- ✅ Human Aimbot (v9.9.8)
     ASet:CreateLabel("─── Modo Humano ───")
     ASet:CreateToggle({ Text = "Human Mode (switch entre targets)", Default = false, Index = "Aim_HumanMode",
-        Callback = function(v) Settings.Aimbot.HumanMode = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_HumanMode", function() Settings.Aimbot.HumanMode = v end) end })
     ASet:CreateSlider({ Text = "Switch Cooldown (s)", Min = 0.1, Max = 2, Default = 0.45, Index = "Aim_SwitchCooldown",
-        Callback = function(v) Settings.Aimbot.SwitchCooldown = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_SwitchCooldown", function() Settings.Aimbot.SwitchCooldown = v end) end })
     ASet:CreateSlider({ Text = "Switch Range (px)", Min = 5, Max = 200, Default = 40, Index = "Aim_SwitchRange",
-        Callback = function(v) Settings.Aimbot.SwitchRange = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_SwitchRange", function() Settings.Aimbot.SwitchRange = v end) end })
     ASet:CreateToggle({ Text = "Humanize (micro jitter)", Default = true, Index = "Aim_Humanize",
-        Callback = function(v) Settings.Aimbot.Humanize = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_Humanize", function() Settings.Aimbot.Humanize = v end) end })
     ASet:CreateSlider({ Text = "Jitter Amount", Min = 0, Max = 2, Default = 0.35, Index = "Aim_Jitter",
-        Callback = function(v) Settings.Aimbot.JitterAmount = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_Jitter", function() Settings.Aimbot.JitterAmount = v end) end })
     ASet:CreateSlider({ Text = "Jitter Speed (Hz)", Min = 1, Max = 30, Default = 12, Index = "Aim_JitterSpeed",
-        Callback = function(v) Settings.Aimbot.JitterSpeed = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_JitterSpeed", function() Settings.Aimbot.JitterSpeed = v end) end })
     ASet:CreateDropdown({ Text = "Ease Style", Options = {"Linear", "EaseOut", "EaseInOut"}, Default = "EaseOut", Index = "Aim_EaseStyle",
-        Callback = function(v) Settings.Aimbot.EaseStyle = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_EaseStyle", function() Settings.Aimbot.EaseStyle = v end) end })
     ASet:CreateSlider({ Text = "Transition Duration (s)", Min = 0.05, Max = 0.5, Default = 0.15, Index = "Aim_TransDur",
-        Callback = function(v) Vars.TARGET_TRANSITION_DURATION = v end })
+        Callback = function(v) Logger.SafeCall("UI/Aim_TransDur", function() Vars.TARGET_TRANSITION_DURATION = v end) end })
 
     local APMSet = AimbotTab:CreateSection("Aim Part Selection")
     APMSet:CreateLabel("Smart Nearest: selecciona la parte según la posición del mouse en el bbox del enemigo.")
     APMSet:CreateDropdown({ Text = "Aim Part Mode", Options = Vars.BODY_PARTS_ALL, Default = "Smart Nearest", Index = "Aim_AimPartMode",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Aim_AimPartMode", function()
             Settings.Aimbot.AimPartMode = v
             Vars.targetTransition.previousPlayer = nil
-        end })
+        end) end })
 
     local SmartSet = AimbotTab:CreateSection("Smart Nearest - Zones (flexible)")
     SmartSet:CreateLabel("Zonas verticales (0-1). Mouse dentro del bbox selecciona la parte.")
     SmartSet:CreateSlider({ Text = "Head Zone Bottom (Y)", Min = 0.05, Max = 0.5, Default = 0.22, Index = "Smart_HeadZone",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Smart_HeadZone", function()
             if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
             Settings.Aimbot.SmartNearest.HeadZone = v
-        end })
+        end) end })
     SmartSet:CreateSlider({ Text = "Torso Zone Bottom (Y)", Min = 0.3, Max = 0.9, Default = 0.55, Index = "Smart_TorsoZone",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Smart_TorsoZone", function()
             if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
             Settings.Aimbot.SmartNearest.TorsoZone = v
-        end })
+        end) end })
     SmartSet:CreateSlider({ Text = "Left Arm Zone X", Min = 0.1, Max = 0.5, Default = 0.35, Index = "Smart_LeftArmX",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Smart_LeftArmX", function()
             if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
             Settings.Aimbot.SmartNearest.LeftArmZoneX = v
-        end })
+        end) end })
     SmartSet:CreateSlider({ Text = "Right Arm Zone X", Min = 0.5, Max = 0.9, Default = 0.65, Index = "Smart_RightArmX",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Smart_RightArmX", function()
             if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
             Settings.Aimbot.SmartNearest.RightArmZoneX = v
-        end })
+        end) end })
     SmartSet:CreateToggle({ Text = "Require Visible (raycast)", Default = false, Index = "Smart_RequireVis",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Smart_RequireVis", function()
             if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
             Settings.Aimbot.SmartNearest.RequireVisible = v
-        end })
+        end) end })
     SmartSet:CreateSlider({ Text = "Max Screen Dist (px) (fallback)", Min = 50, Max = 800, Default = 250, Index = "Smart_MaxScreenDist",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Smart_MaxScreenDist", function()
             if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
             Settings.Aimbot.SmartNearest.MaxScreenDist = v
-        end })
+        end) end })
 
     local SelSet = AimbotTab:CreateSection("Selective FOV Zones (legacy)")
     SelSet:CreateSlider({ Text = "Head Zone Bottom", Min = 0, Max = 1, Default = 0.35, Index = "Sel_HeadBottom",
-        Callback = function(v) Settings.Aimbot.Selective.HeadZoneBottom = v end })
+        Callback = function(v) Logger.SafeCall("UI/Sel_HeadBottom", function() Settings.Aimbot.Selective.HeadZoneBottom = v end) end })
     SelSet:CreateSlider({ Text = "Torso Zone Bottom", Min = 0, Max = 1, Default = 0.70, Index = "Sel_TorsoBottom",
-        Callback = function(v) Settings.Aimbot.Selective.TorsoZoneBottom = v end })
+        Callback = function(v) Logger.SafeCall("UI/Sel_TorsoBottom", function() Settings.Aimbot.Selective.TorsoZoneBottom = v end) end })
     SelSet:CreateSlider({ Text = "Left Arm Zone Right", Min = 0, Max = 1, Default = 0.35, Index = "Sel_LeftArmRight",
-        Callback = function(v) Settings.Aimbot.Selective.LeftArmZoneRight = v end })
+        Callback = function(v) Logger.SafeCall("UI/Sel_LeftArmRight", function() Settings.Aimbot.Selective.LeftArmZoneRight = v end) end })
     SelSet:CreateSlider({ Text = "Right Arm Zone Left", Min = 0, Max = 1, Default = 0.65, Index = "Sel_RightArmLeft",
-        Callback = function(v) Settings.Aimbot.Selective.RightArmZoneLeft = v end })
+        Callback = function(v) Logger.SafeCall("UI/Sel_RightArmLeft", function() Settings.Aimbot.Selective.RightArmZoneLeft = v end) end })
 
     local HybSet = AimbotTab:CreateSection("Hybrid Mode")
     HybSet:CreateDropdown({ Text = "Hybrid Base Part", Options = {"Head", "UpperTorso", "Torso", "LowerTorso"}, Default = "Head", Index = "Hyb_BasePart",
-        Callback = function(v) Settings.Aimbot.Hybrid.BasePart = v end })
+        Callback = function(v) Logger.SafeCall("UI/Hyb_BasePart", function() Settings.Aimbot.Hybrid.BasePart = v end) end })
     HybSet:CreateSlider({ Text = "Vertical Bias Threshold", Min = 0, Max = 1, Default = 0.15, Index = "Hyb_VertBias",
-        Callback = function(v) Settings.Aimbot.Hybrid.VerticalBiasThreshold = v end })
+        Callback = function(v) Logger.SafeCall("UI/Hyb_VertBias", function() Settings.Aimbot.Hybrid.VerticalBiasThreshold = v end) end })
     HybSet:CreateToggle({ Text = "Allow Return (up)", Default = false, Index = "Hyb_AllowReturn",
-        Callback = function(v) Settings.Aimbot.Hybrid.AllowReturn = v end })
+        Callback = function(v) Logger.SafeCall("UI/Hyb_AllowReturn", function() Settings.Aimbot.Hybrid.AllowReturn = v end) end })
 
     local WLSet = AimbotTab:CreateSection("Whitelist")
     WLSet:CreateButton("Toggle Whitelist (current target)", function()
-        local t = Vars.TargetManager:GetCurrentTarget()
-        if t then
-            Vars.TargetManager:AddToWhitelist(t.player)
-            local state = Vars.TargetManager:IsWhitelisted(t.player) and "añadido" or "removido"
-            if Window.Notify then Window:Notify("Whitelist", t.player.Name .. " " .. state, 2, "Info") end
-        else
-            if Window.Notify then Window:Notify("Whitelist", "Sin target actual", 2, "Warning") end
-        end
+        Logger.SafeCall("UI/Whitelist", function()
+            local t = Vars.TargetManager:GetCurrentTarget()
+            if t then
+                Vars.TargetManager:AddToWhitelist(t.player)
+                local state = Vars.TargetManager:IsWhitelisted(t.player) and "añadido" or "removido"
+                if Window.Notify then Window:Notify("Whitelist", t.player.Name .. " " .. state, 2, "Info") end
+            else
+                if Window.Notify then Window:Notify("Whitelist", "Sin target actual", 2, "Warning") end
+            end
+        end)
     end)
 
     -- ============================================================
-    -- Aim Assist Tab (v9.9.8 mejorado)
+    -- Aim Assist Tab
     -- ============================================================
     local AimAssistTab = Window:CreateTab("Aim Assist")
     local AASet = AimAssistTab:CreateSection("Aim Assist (Legit)")
     AASet:CreateLabel("Asistencia suave: sólo tira del aim hacia el enemigo en FOV.")
     AASet:CreateToggle({ Text = "🎯 Aim Assist Master", Default = false, Index = "AA_Enabled",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/AA_Enabled", function()
             Settings.AimAssist.Enabled = v
             if v then Vars.StartAimAssist() else Vars.StopAimAssist() end
-        end })
+        end) end })
 
     local AASection_FOV = AimAssistTab:CreateSection("Zona de asistencia")
     AASection_FOV:CreateSlider({ Text = "FOV (grados) - tamaño del círculo", Min = 1, Max = 360, Default = 30, Index = "AA_FOV",
-        Callback = function(v) Settings.AimAssist.FOV = v end })
+        Callback = function(v) Logger.SafeCall("UI/AA_FOV", function() Settings.AimAssist.FOV = v end) end })
     AASection_FOV:CreateToggle({ Text = "Mostrar círculo FOV", Default = false, Index = "AA_ShowFOV",
-        Callback = function(v) Settings.AimAssist.ShowFOV = v end })
+        Callback = function(v) Logger.SafeCall("UI/AA_ShowFOV", function() Settings.AimAssist.ShowFOV = v end) end })
     AASection_FOV:CreateColorpicker({ Text = "Color del círculo", Default = Color3.fromRGB(0, 255, 255), Index = "AA_FOVColor",
-        Callback = function(c) Settings.AimAssist.FOVColor = c end })
+        Callback = function(c) Logger.SafeCall("UI/AA_FOVColor", function() Settings.AimAssist.FOVColor = c end) end })
     AASection_FOV:CreateSlider({ Text = "Distancia máxima (studs)", Min = 50, Max = 2000, Default = 500, Index = "AA_MaxDist",
-        Callback = function(v) Settings.AimAssist.MaxDistance = v end })
+        Callback = function(v) Logger.SafeCall("UI/AA_MaxDist", function() Settings.AimAssist.MaxDistance = v end) end })
 
     local AASection_Feel = AimAssistTab:CreateSection("Sensación (feel)")
     AASection_Feel:CreateLabel("Smoothness: 0 = imán · 1 = casi sin ayuda")
     AASection_Feel:CreateSlider({ Text = "Smoothness", Min = 0, Max = 100, Default = 50, Index = "AA_Smoothness",
-        Callback = function(v) Settings.AimAssist.Smoothness = v / 100 end })
+        Callback = function(v) Logger.SafeCall("UI/AA_Smoothness", function() Settings.AimAssist.Smoothness = v / 100 end) end })
     AASection_Feel:CreateLabel("Strength: cuánto tira hacia el enemigo")
     AASection_Feel:CreateSlider({ Text = "Strength", Min = 0, Max = 100, Default = 60, Index = "AA_Strength",
-        Callback = function(v) Settings.AimAssist.Strength = v / 100 end })
+        Callback = function(v) Logger.SafeCall("UI/AA_Strength", function() Settings.AimAssist.Strength = v / 100 end) end })
     AASection_Feel:CreateLabel("Max Speed: velocidad máx de rotación (grados/s)")
     AASection_Feel:CreateSlider({ Text = "Max Speed (deg/s)", Min = 1, Max = 180, Default = 30, Index = "AA_MaxSpeed",
-        Callback = function(v) Settings.AimAssist.MaxSpeed = v end })
+        Callback = function(v) Logger.SafeCall("UI/AA_MaxSpeed", function() Settings.AimAssist.MaxSpeed = v end) end })
 
     local AASection_Human = AimAssistTab:CreateSection("Humano")
     AASection_Human:CreateToggle({ Text = "Human Mode (switch suave entre targets)", Default = true, Index = "AA_HumanMode",
-        Callback = function(v) Settings.AimAssist.HumanMode = v end })
+        Callback = function(v) Logger.SafeCall("UI/AA_HumanMode", function() Settings.AimAssist.HumanMode = v end) end })
     AASection_Human:CreateSlider({ Text = "Switch Cooldown (s)", Min = 0.1, Max = 2, Default = 0.5, Index = "AA_SwitchCooldown",
-        Callback = function(v) Settings.AimAssist.SwitchCooldown = v end })
+        Callback = function(v) Logger.SafeCall("UI/AA_SwitchCooldown", function() Settings.AimAssist.SwitchCooldown = v end) end })
     AASection_Human:CreateSlider({ Text = "Switch Range (px)", Min = 5, Max = 200, Default = 30, Index = "AA_SwitchRange",
-        Callback = function(v) Settings.AimAssist.SwitchRange = v end })
+        Callback = function(v) Logger.SafeCall("UI/AA_SwitchRange", function() Settings.AimAssist.SwitchRange = v end) end })
     AASection_Human:CreateSlider({ Text = "Jitter Amount", Min = 0, Max = 2, Default = 0.25, Index = "AA_Jitter",
-        Callback = function(v) Settings.AimAssist.JitterAmount = v end })
+        Callback = function(v) Logger.SafeCall("UI/AA_Jitter", function() Settings.AimAssist.JitterAmount = v end) end })
 
     local AASection_Mouse = AimAssistTab:CreateSection("Mouse")
     AASection_Mouse:CreateToggle({ Text = "Require Mouse Movement (solo si mueves)", Default = false, Index = "AA_ReqMouse",
-        Callback = function(v) Settings.AimAssist.RequireMouseMovement = v end })
+        Callback = function(v) Logger.SafeCall("UI/AA_ReqMouse", function() Settings.AimAssist.RequireMouseMovement = v end) end })
     AASection_Mouse:CreateSlider({ Text = "Mouse Threshold (px)", Min = 0, Max = 5, Default = 0.5, Index = "AA_MouseThreshold",
-        Callback = function(v) Settings.AimAssist.MouseMovementThreshold = v end })
+        Callback = function(v) Logger.SafeCall("UI/AA_MouseThreshold", function() Settings.AimAssist.MouseMovementThreshold = v end) end })
     AASection_Mouse:CreateSlider({ Text = "Mouse Strength (0-1)", Min = 0, Max = 1, Default = 0.4, Index = "AA_MouseStrength",
-        Callback = function(v) Settings.AimAssist.MouseStrength = v end })
+        Callback = function(v) Logger.SafeCall("UI/AA_MouseStrength", function() Settings.AimAssist.MouseStrength = v end) end })
     AASection_Mouse:CreateSlider({ Text = "Movement Memory (s)", Min = 0.05, Max = 1, Default = 0.2, Index = "AA_MovementMemory",
-        Callback = function(v) Settings.AimAssist.MovementMemory = v end })
+        Callback = function(v) Logger.SafeCall("UI/AA_MovementMemory", function() Settings.AimAssist.MovementMemory = v end) end })
     AASection_Mouse:CreateDropdown({ Text = "Método", Options = {"Camera", "Mouse"}, Default = "Camera", Index = "AA_Method",
-        Callback = function(v) Settings.AimAssist.UseMouse = (v == "Mouse") end })
+        Callback = function(v) Logger.SafeCall("UI/AA_Method", function() Settings.AimAssist.UseMouse = (v == "Mouse") end) end })
 
     local AASection_Filters = AimAssistTab:CreateSection("Filtros")
     AASection_Filters:CreateToggle({ Text = "Team Check", Default = false, Index = "AA_TeamCheck",
-        Callback = function(v) Settings.AimAssist.TeamCheck = v end })
+        Callback = function(v) Logger.SafeCall("UI/AA_TeamCheck", function() Settings.AimAssist.TeamCheck = v end) end })
     AASection_Filters:CreateToggle({ Text = "Ignore Passive", Default = false, Index = "AA_IgnorePassive",
-        Callback = function(v) Settings.AimAssist.IgnorePassive = v end })
+        Callback = function(v) Logger.SafeCall("UI/AA_IgnorePassive", function() Settings.AimAssist.IgnorePassive = v end) end })
     AASection_Filters:CreateToggle({ Text = "Wall Check", Default = false, Index = "AA_WallCheck",
-        Callback = function(v) Settings.AimAssist.WallCheck = v end })
+        Callback = function(v) Logger.SafeCall("UI/AA_WallCheck", function() Settings.AimAssist.WallCheck = v end) end })
 
     -- ============================================================
     -- Weapon Mods
@@ -5444,10 +5784,10 @@ do
     local WeaponTab = Window:CreateTab("Weapon Mods")
     local WS = WeaponTab:CreateSection("Weapon")
     WS:CreateToggle({ Text = "No Recoil", Default = false, Index = "W_NoRecoil",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/W_NoRecoil", function()
             Settings.WeaponMods.NoRecoil = v
             if v then Vars.StartNoRecoil() else Vars.StopNoRecoil() end
-        end })
+        end) end })
 
     -- ============================================================
     -- Visuals Tab
@@ -5455,70 +5795,72 @@ do
     local VisualsTab = Window:CreateTab("Visuals")
     local VLight = VisualsTab:CreateSection("Lighting")
     VLight:CreateToggle({ Text = "Full Bright", Default = false, Index = "Vis_FullBright",
-        Callback = function(v) Vars.setFullBright(v) end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_FullBright", function() Vars.setFullBright(v) end) end })
     VLight:CreateToggle({ Text = "X-Ray", Default = false, Index = "Vis_XRay",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Vis_XRay", function()
             Settings.Visuals.XRay = v
             if v then Vars.StartXRay() else Vars.StopXRay() end
-        end })
+        end) end })
     VLight:CreateToggle({ Text = "No Fog", Default = false, Index = "Vis_NoFog",
-        Callback = function(v) Vars.setNoFog(v) end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_NoFog", function() Vars.setNoFog(v) end) end })
     VLight:CreateToggle({ Text = "No Bloom", Default = false, Index = "Vis_NoBloom",
-        Callback = function(v) Vars.setNoBloom(v) end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_NoBloom", function() Vars.setNoBloom(v) end) end })
     VLight:CreateToggle({ Text = "No SunRays", Default = false, Index = "Vis_NoSunRays",
-        Callback = function(v) Vars.setNoSunRays(v) end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_NoSunRays", function() Vars.setNoSunRays(v) end) end })
     VLight:CreateButton("Reset All Visuals", function()
-        if Vars.ResetAllVisuals then Vars.ResetAllVisuals() end
-        if Window.Notify then Window:Notify("Visuals", "Reset", 2, "Success") end
+        Logger.SafeCall("UI/ResetVisuals", function()
+            if Vars.ResetAllVisuals then Vars.ResetAllVisuals() end
+            if Window.Notify then Window:Notify("Visuals", "Reset", 2, "Success") end
+        end)
     end)
 
     local VFOV = VisualsTab:CreateSection("Camera")
     VFOV:CreateToggle({ Text = "Custom FOV", Default = false, Index = "Vis_CustomFOV",
-        Callback = function(v) Vars.setCustomFOV(v, Settings.Visuals.FOVValue) end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_CustomFOV", function() Vars.setCustomFOV(v, Settings.Visuals.FOVValue) end) end })
     VFOV:CreateSlider({ Text = "FOV Value", Min = 1, Max = 120, Default = 70, Index = "Vis_FOVValue",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Vis_FOVValue", function()
             Settings.Visuals.FOVValue = v
             if Settings.Visuals.CustomFOV then Vars.setCustomFOV(true, v) end
-        end })
+        end) end })
 
     local VHide = VisualsTab:CreateSection("First Person")
     VHide:CreateToggle({ Text = "Hide Body", Default = false, Index = "Vis_HideBody",
-        Callback = function(v) Settings.Visuals.HideBody = v end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_HideBody", function() Settings.Visuals.HideBody = v end) end })
     VHide:CreateToggle({ Text = "Hide Hands/Arms", Default = false, Index = "Vis_HideHands",
-        Callback = function(v) Settings.Visuals.HideHands = v end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_HideHands", function() Settings.Visuals.HideHands = v end) end })
     VHide:CreateToggle({ Text = "Hide Tool", Default = false, Index = "Vis_HideTool",
-        Callback = function(v) Settings.Visuals.HideTool = v end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_HideTool", function() Settings.Visuals.HideTool = v end) end })
 
     local VTracer = VisualsTab:CreateSection("Bullet Tracers")
     VTracer:CreateToggle({ Text = "Bullet Tracers", Default = false, Index = "Vis_BulletTracers",
-        Callback = function(v) Settings.Visuals.BulletTracers = v end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_BulletTracers", function() Settings.Visuals.BulletTracers = v end) end })
     VTracer:CreateColorpicker({ Text = "Tracer Color", Default = Color3.fromRGB(255, 50, 50), Index = "Vis_TracerColor",
-        Callback = function(c) Settings.Visuals.TracerColor = c end })
+        Callback = function(c) Logger.SafeCall("UI/Vis_TracerColor", function() Settings.Visuals.TracerColor = c end) end })
     VTracer:CreateSlider({ Text = "Lifetime (s)", Min = 0.1, Max = 10, Default = 2, Index = "Vis_TracerLifetime",
-        Callback = function(v) Settings.Visuals.TracerLifetime = v end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_TracerLifetime", function() Settings.Visuals.TracerLifetime = v end) end })
     VTracer:CreateSlider({ Text = "Thickness", Min = 1, Max = 10, Default = 2, Index = "Vis_TracerThickness",
-        Callback = function(v) Settings.Visuals.TracerThickness = v end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_TracerThickness", function() Settings.Visuals.TracerThickness = v end) end })
     VTracer:CreateSlider({ Text = "Max Distance", Min = 50, Max = 2000, Default = 500, Index = "Vis_TracerMaxDist",
-        Callback = function(v) Settings.Visuals.TracerMaxDistance = v end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_TracerMaxDist", function() Settings.Visuals.TracerMaxDistance = v end) end })
     VTracer:CreateSlider({ Text = "Max Active Tracers", Min = 5, Max = 200, Default = 40, Index = "Vis_MaxActiveTracers",
-        Callback = function(v) Settings.Visuals.MaxActiveTracers = math.floor(v) end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_MaxActiveTracers", function() Settings.Visuals.MaxActiveTracers = math.floor(v) end) end })
 
     local VCross = VisualsTab:CreateSection("Crosshair")
     VCross:CreateToggle({ Text = "Custom Crosshair", Default = false, Index = "Vis_Crosshair",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Vis_Crosshair", function()
             Settings.Visuals.Crosshair = v
             if v then Vars.StartCrosshair() else Vars.StopCrosshair() end
-        end })
+        end) end })
     VCross:CreateColorpicker({ Text = "Crosshair Color", Default = Color3.fromRGB(255, 255, 255), Index = "Vis_CrosshairColor",
-        Callback = function(c) Settings.Visuals.CrosshairColor = c end })
+        Callback = function(c) Logger.SafeCall("UI/Vis_CrosshairColor", function() Settings.Visuals.CrosshairColor = c end) end })
     VCross:CreateColorpicker({ Text = "Enemy Color", Default = Color3.fromRGB(255, 0, 0), Index = "Vis_CrosshairEnemyColor",
-        Callback = function(c) Settings.Visuals.CrosshairEnemyColor = c end })
+        Callback = function(c) Logger.SafeCall("UI/Vis_CrosshairEnemyColor", function() Settings.Visuals.CrosshairEnemyColor = c end) end })
     VCross:CreateSlider({ Text = "Size", Min = 2, Max = 20, Default = 8, Index = "Vis_CrosshairSize",
-        Callback = function(v) Settings.Visuals.CrosshairSize = v end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_CrosshairSize", function() Settings.Visuals.CrosshairSize = v end) end })
     VCross:CreateSlider({ Text = "Thickness", Min = 1, Max = 5, Default = 2, Index = "Vis_CrosshairThickness",
-        Callback = function(v) Settings.Visuals.CrosshairThickness = v end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_CrosshairThickness", function() Settings.Visuals.CrosshairThickness = v end) end })
     VCross:CreateSlider({ Text = "Gap", Min = 0, Max = 20, Default = 4, Index = "Vis_CrosshairGap",
-        Callback = function(v) Settings.Visuals.CrosshairGap = v end })
+        Callback = function(v) Logger.SafeCall("UI/Vis_CrosshairGap", function() Settings.Visuals.CrosshairGap = v end) end })
 
     -- ============================================================
     -- Advanced Tab
@@ -5527,130 +5869,130 @@ do
 
     local AntiKickSet = AdvancedTab:CreateSection("AntiKick")
     AntiKickSet:CreateToggle({ Text = "AntiKick (block kicks)", Default = false, Index = "Adv_AntiKick",
-        Callback = function(v) Vars.ApplyAntiKick(v) end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_AntiKick", function() Vars.ApplyAntiKick(v) end) end })
 
     local HBSet = AdvancedTab:CreateSection("Hitbox Advanced")
     HBSet:CreateSlider({ Text = "Hit Chance %", Min = 0, Max = 100, Default = 100, Index = "Adv_HitChance",
-        Callback = function(v) Settings.Advanced.HitChance = math.floor(v) end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_HitChance", function() Settings.Advanced.HitChance = math.floor(v) end) end })
     HBSet:CreateSlider({ Text = "Headshot Chance %", Min = 0, Max = 100, Default = 100, Index = "Adv_HeadshotChance",
-        Callback = function(v) Settings.Advanced.HeadshotChance = math.floor(v) end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_HeadshotChance", function() Settings.Advanced.HeadshotChance = math.floor(v) end) end })
     HBSet:CreateSlider({ Text = "STS Distance", Min = 0, Max = 50, Default = 5, Index = "Adv_STS",
-        Callback = function(v) Settings.Advanced.STS_Distance = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_STS", function() Settings.Advanced.STS_Distance = v end) end })
     HBSet:CreateToggle({ Text = "Scale To Screen", Default = false, Index = "Adv_ScaleToScreen",
-        Callback = function(v) Settings.Advanced.ScaleToScreen = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_ScaleToScreen", function() Settings.Advanced.ScaleToScreen = v end) end })
     HBSet:CreateSlider({ Text = "Max Expansion", Min = 1, Max = 30, Default = 8, Index = "Adv_MaxExpansion",
-        Callback = function(v) Settings.Advanced.MaxExpansion = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_MaxExpansion", function() Settings.Advanced.MaxExpansion = v end) end })
 
     local VizSet = AdvancedTab:CreateSection("Hitbox Visualizer")
     VizSet:CreateToggle({ Text = "Enable Hitbox Visualizer", Default = false, Index = "Adv_HitboxViz",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Adv_HitboxViz", function()
             Settings.Advanced.HitboxViz_Enabled = v
             if not v then Vars.ClearAllHitboxViz() end
-        end })
+        end) end })
     VizSet:CreateDropdown({ Text = "Shape", Options = {"Block", "Sphere", "Cylinder"}, Default = "Block", Index = "Adv_VizShape",
-        Callback = function(v) Settings.Advanced.HitboxViz_Shape = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_VizShape", function() Settings.Advanced.HitboxViz_Shape = v end) end })
     VizSet:CreateDropdown({ Text = "Material", Options = {"Neon", "ForceField", "Glass", "Plastic", "Metal", "DiamondPlate"}, Default = "Neon", Index = "Adv_VizMat",
-        Callback = function(v) Settings.Advanced.HitboxViz_Material = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_VizMat", function() Settings.Advanced.HitboxViz_Material = v end) end })
     VizSet:CreateSlider({ Text = "Transparency", Min = 0, Max = 1, Default = 0.6, Index = "Adv_VizTrans",
-        Callback = function(v) Settings.Advanced.HitboxViz_Transparency = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_VizTrans", function() Settings.Advanced.HitboxViz_Transparency = v end) end })
     VizSet:CreateColorpicker({ Text = "Color", Default = Color3.fromRGB(255, 0, 0), Index = "Adv_VizColor",
-        Callback = function(c) Settings.Advanced.HitboxViz_Color = c end })
+        Callback = function(c) Logger.SafeCall("UI/Adv_VizColor", function() Settings.Advanced.HitboxViz_Color = c end) end })
     VizSet:CreateSlider({ Text = "Gap", Min = 0, Max = 3, Default = 0.4, Index = "Adv_VizGap",
-        Callback = function(v) Settings.Advanced.HitboxViz_Gap = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_VizGap", function() Settings.Advanced.HitboxViz_Gap = v end) end })
 
     local IndSet = AdvancedTab:CreateSection("Indicator UI")
     IndSet:CreateToggle({ Text = "Enable Indicator", Default = false, Index = "Adv_Indicator",
-        Callback = function(v) Settings.Advanced.Indicator_Enabled = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_Indicator", function() Settings.Advanced.Indicator_Enabled = v end) end })
     IndSet:CreateToggle({ Text = "Draggable", Default = false, Index = "Adv_IndicatorDrag",
-        Callback = function(v) Settings.Advanced.Indicator_Draggable = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_IndicatorDrag", function() Settings.Advanced.Indicator_Draggable = v end) end })
 
     local QTSet = AdvancedTab:CreateSection("Quick Toggles")
     QTSet:CreateToggle({ Text = "Enable Quick Toggles", Default = false, Index = "Adv_QT",
-        Callback = function(v) Settings.Advanced.QT_Enabled = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_QT", function() Settings.Advanced.QT_Enabled = v end) end })
     QTSet:CreateToggle({ Text = "Draggable", Default = false, Index = "Adv_QTDrag",
-        Callback = function(v) Settings.Advanced.QT_Draggable = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_QTDrag", function() Settings.Advanced.QT_Draggable = v end) end })
 
     local CamSet = AdvancedTab:CreateSection("Camera")
     CamSet:CreateToggle({ Text = "Camera Y Offset", Default = false, Index = "Adv_CamY",
-        Callback = function(v) Settings.Advanced.CamY_Enabled = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_CamY", function() Settings.Advanced.CamY_Enabled = v end) end })
     CamSet:CreateSlider({ Text = "Y Offset", Min = -20, Max = 20, Default = 0, Index = "Adv_CamYOffset",
-        Callback = function(v) Settings.Advanced.CamY_Offset = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_CamYOffset", function() Settings.Advanced.CamY_Offset = v end) end })
     CamSet:CreateToggle({ Text = "CFrame View", Default = false, Index = "Adv_CFrameView",
-        Callback = function(v) Settings.Advanced.CFrameView_Enabled = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_CFrameView", function() Settings.Advanced.CFrameView_Enabled = v end) end })
 
     local WorldSet = AdvancedTab:CreateSection("World")
     WorldSet:CreateToggle({ Text = "World Proximity (auto Prompts)", Default = false, Index = "Adv_WP",
-        Callback = function(v) Settings.Advanced.WP_Enabled = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_WP", function() Settings.Advanced.WP_Enabled = v end) end })
     WorldSet:CreateSlider({ Text = "WP Max Activation", Min = 0, Max = 500, Default = 100, Index = "Adv_WPMax",
-        Callback = function(v) Settings.Advanced.WP_MaxActivation = math.floor(v) end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_WPMax", function() Settings.Advanced.WP_MaxActivation = math.floor(v) end) end })
     WorldSet:CreateToggle({ Text = "World Xray", Default = false, Index = "Adv_WX",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Adv_WX", function()
             Settings.Advanced.WX_Enabled = v
             Vars.ApplyWorldXray(v)
-        end })
+        end) end })
     WorldSet:CreateSlider({ Text = "Xray Transparency", Min = 0, Max = 1, Default = 0.5, Index = "Adv_WXTrans",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Adv_WXTrans", function()
             Settings.Advanced.WX_Transparency = v
             if Settings.Advanced.WX_Enabled then
                 Vars.ApplyWorldXray(false)
                 Vars.ApplyWorldXray(true)
             end
-        end })
+        end) end })
     WorldSet:CreateToggle({ Text = "Loop Fire", Default = false, Index = "Adv_LF",
-        Callback = function(v) Settings.Advanced.LF_Enabled = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_LF", function() Settings.Advanced.LF_Enabled = v end) end })
     WorldSet:CreateDropdown({ Text = "Fire Type", Options = {"TouchInterest", "ClickDetector", "ProximityPrompt"}, Default = "TouchInterest", Index = "Adv_LFType",
-        Callback = function(v) Settings.Advanced.LF_Type = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_LFType", function() Settings.Advanced.LF_Type = v end) end })
     WorldSet:CreateSlider({ Text = "Fire Interval (s)", Min = 0.1, Max = 10, Default = 1, Index = "Adv_LFInterval",
-        Callback = function(v) Settings.Advanced.LF_Interval = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_LFInterval", function() Settings.Advanced.LF_Interval = v end) end })
 
     local MoveSet = AdvancedTab:CreateSection("Movement Extras")
     MoveSet:CreateToggle({ Text = "Truss", Default = false, Index = "Adv_Truss",
-        Callback = function(v) Vars.ApplyTruss(v) end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_Truss", function() Vars.ApplyTruss(v) end) end })
     MoveSet:CreateToggle({ Text = "Airwalk", Default = false, Index = "Adv_Airwalk",
-        Callback = function(v) Vars.ApplyAirwalk(v) end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_Airwalk", function() Vars.ApplyAirwalk(v) end) end })
     MoveSet:CreateToggle({ Text = "Autorespawn", Default = false, Index = "Adv_Autorespawn",
-        Callback = function(v) Vars.ApplyAutorespawn(v) end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_Autorespawn", function() Vars.ApplyAutorespawn(v) end) end })
     MoveSet:CreateToggle({ Text = "Flight", Default = false, Index = "Adv_Flight",
-        Callback = function(v) Vars.ApplyFlight(v) end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_Flight", function() Vars.ApplyFlight(v) end) end })
     MoveSet:CreateSlider({ Text = "Flight Speed", Min = 10, Max = 300, Default = 50, Index = "Adv_FlightSpeed",
-        Callback = function(v) Settings.Advanced.Flight_Speed = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_FlightSpeed", function() Settings.Advanced.Flight_Speed = v end) end })
 
     local SyncSet = AdvancedTab:CreateSection("Sync / Desync / FPS")
 
     SyncSet:CreateToggle({ Text = "FPS Booster (materials + quality + shadows)", Default = false, Index = "Adv_FPSBooster",
-        Callback = function(v) Vars.ApplyFPSBooster(v) end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_FPSBooster", function() Vars.ApplyFPSBooster(v) end) end })
     SyncSet:CreateDropdown({ Text = "Quality Level", Options = {"Level01","Level02","Level03","Level04","Level05","Level06","Level07","Level08","Level09","Level10"}, Default = "Level01", Index = "Adv_FPSQuality",
-        Callback = function(v) Settings.Advanced.FPSBooster_QualityLevel = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_FPSQuality", function() Settings.Advanced.FPSBooster_QualityLevel = v end) end })
     SyncSet:CreateDropdown({ Text = "LOD", Options = {"Low","Automatic"}, Default = "Low", Index = "Adv_FPSLOD",
-        Callback = function(v) Settings.Advanced.FPSBooster_LOD = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_FPSLOD", function() Settings.Advanced.FPSBooster_LOD = v end) end })
     SyncSet:CreateToggle({ Text = "Disable Global Shadows", Default = false, Index = "Adv_FPSShadows",
-        Callback = function(v) Settings.Advanced.FPSBooster_Shadows = not v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_FPSShadows", function() Settings.Advanced.FPSBooster_Shadows = not v end) end })
     SyncSet:CreateToggle({ Text = "Change Materials", Default = false, Index = "Adv_FPSMaterials",
-        Callback = function(v) Settings.Advanced.FPSBooster_Materials = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_FPSMaterials", function() Settings.Advanced.FPSBooster_Materials = v end) end })
     SyncSet:CreateDropdown({ Text = "Material Target", Options = {"Plastic","SmoothPlastic"}, Default = "Plastic", Index = "Adv_FPSMatTarget",
-        Callback = function(v) Settings.Advanced.FPSBooster_MaterialTarget = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_FPSMatTarget", function() Settings.Advanced.FPSBooster_MaterialTarget = v end) end })
     SyncSet:CreateToggle({ Text = "Remove Effects (Textures/Decals/Particles)", Default = false, Index = "Adv_FPSEffects",
-        Callback = function(v) Settings.Advanced.FPSBooster_RemoveEffects = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_FPSEffects", function() Settings.Advanced.FPSBooster_RemoveEffects = v end) end })
     SyncSet:CreateToggle({ Text = "Streaming Radius Boost", Default = false, Index = "Adv_FPSStreaming",
-        Callback = function(v) Settings.Advanced.FPSBooster_StreamingRadius = v end })
+        Callback = function(v) Logger.SafeCall("UI/Adv_FPSStreaming", function() Settings.Advanced.FPSBooster_StreamingRadius = v end) end })
 
     SyncSet:CreateToggle({ Text = "Sync Booster (network)", Default = false, Index = "Sync_Enabled",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Sync_Enabled", function()
             Settings.Sync.Enabled = v
             if v then Vars.StartSyncBooster() else Vars.StopSyncBooster() end
-        end })
+        end) end })
     SyncSet:CreateToggle({ Text = "Sync: Auto-disable on low FPS", Default = false, Index = "Sync_AutoDisable",
-        Callback = function(v) Settings.Sync.AutoDisableOnLowFPS = v end })
+        Callback = function(v) Logger.SafeCall("UI/Sync_AutoDisable", function() Settings.Sync.AutoDisableOnLowFPS = v end) end })
     SyncSet:CreateToggle({ Text = "Sync: Try FFlag fallback", Default = false, Index = "Sync_FFlagFallback",
-        Callback = function(v) Settings.Sync.TryFFlagFallback = v end })
+        Callback = function(v) Logger.SafeCall("UI/Sync_FFlagFallback", function() Settings.Sync.TryFFlagFallback = v end) end })
 
     SyncSet:CreateToggle({ Text = "Desync (Seat + Weld)", Default = false, Index = "Adv_Desync",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Adv_Desync", function()
             Settings.Advanced.Desync_Enabled = v
             if v then Vars.StartDesync() else Vars.StopDesync() end
-        end })
+        end) end })
     SyncSet:CreateSlider({ Text = "Desync Transparency", Min = 0, Max = 1, Default = 0.5, Index = "Adv_DesyncTrans",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Adv_DesyncTrans", function()
             Settings.Advanced.Desync_Transparency = v
             if Settings.Advanced.Desync_Enabled and LP.Character then
                 for _, part in ipairs(LP.Character:GetDescendants()) do
@@ -5659,7 +6001,7 @@ do
                     end
                 end
             end
-        end })
+        end) end })
 
     -- ============================================================
     -- Backtrack / Anti-Fall / Movement
@@ -5667,81 +6009,81 @@ do
     local BacktrackTab = Window:CreateTab("Backtrack")
     local BTSet = BacktrackTab:CreateSection("Backtrack")
     BTSet:CreateToggle({ Text = "Enable Backtrack", Default = false, Index = "BT_Enabled",
-        Callback = function(v) Settings.Backtrack.Enabled = v end })
+        Callback = function(v) Logger.SafeCall("UI/BT_Enabled", function() Settings.Backtrack.Enabled = v end) end })
     BTSet:CreateSlider({ Text = "Delay (s)", Min = 0.02, Max = 0.3, Default = 0.1, Index = "BT_Delay",
-        Callback = function(v) Settings.Backtrack.Delay = v end })
+        Callback = function(v) Logger.SafeCall("UI/BT_Delay", function() Settings.Backtrack.Delay = v end) end })
 
     local AntiFallTab = Window:CreateTab("Anti-Fall")
     local AFSection = AntiFallTab:CreateSection("Anti-Fall Damage")
     AFSection:CreateToggle({ Text = "Disable Fall Damage", Default = false, Index = "AF_Enabled",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/AF_Enabled", function()
             Settings.AntiFall.Enabled = v
             if v then Vars.StartAntiFall() else Vars.StopAntiFall() end
-        end })
+        end) end })
 
     local MovementTab = Window:CreateTab("Movement")
     local MSet = MovementTab:CreateSection("Strafe HvH")
     MSet:CreateToggle({ Text = "Strafe HvH", Default = false, Index = "Mov_Strafe",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Mov_Strafe", function()
             Settings.Movement.StrafeEnabled = v
             if v then Vars.StartStrafeHvH() else Vars.StopStrafeHvH() end
-        end })
+        end) end })
     MSet:CreateSlider({ Text = "Strafe Distance", Min = 0.1, Max = 2, Default = 0.3, Index = "Mov_StrafeDist",
-        Callback = function(v) Settings.Movement.StrafeDistance = v end })
+        Callback = function(v) Logger.SafeCall("UI/Mov_StrafeDist", function() Settings.Movement.StrafeDistance = v end) end })
     MSet:CreateSlider({ Text = "Peek Cooldown (s)", Min = 0.02, Max = 0.5, Default = 0.08, Index = "Mov_PeekCooldown",
-        Callback = function(v) Settings.Movement.PeekCooldown = v end })
+        Callback = function(v) Logger.SafeCall("UI/Mov_PeekCooldown", function() Settings.Movement.PeekCooldown = v end) end })
 
     -- ============================================================
-    -- Exploit Tab (Spinbot max 5000, Walkspeed max 5000)
+    -- Exploit Tab
     -- ============================================================
     local ExploitTab = Window:CreateTab("Exploit")
     local ExpSet = ExploitTab:CreateSection("Movement")
     ExpSet:CreateToggle({ Text = "Spinbot", Default = false, Index = "Exp_Spinbot",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Exp_Spinbot", function()
             Settings.Exploit.Spinbot = v
             if v then Vars.StartExploitSpinbot() else Vars.StopExploitSpinbot() end
-        end })
+        end) end })
     ExpSet:CreateSlider({ Text = "Spin Speed (max 5000)", Min = 60, Max = 5000, Default = 1000, Index = "Exp_SpinSpeed",
-        Callback = function(v) Settings.Exploit.SpinbotSpeed = v end })
+        Callback = function(v) Logger.SafeCall("UI/Exp_SpinSpeed", function() Settings.Exploit.SpinbotSpeed = v end) end })
 
     ExpSet:CreateToggle({ Text = "Walkspeed", Default = false, Index = "Exp_Walkspeed",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Exp_Walkspeed", function()
             Settings.Exploit.Walkspeed = v
             if v then Vars.StartExploitWalkspeed() else Vars.StopExploitWalkspeed() end
-        end })
+        end) end })
     ExpSet:CreateSlider({ Text = "Walkspeed Value (max 5000)", Min = 16, Max = 5000, Default = 16, Index = "Exp_WalkspeedValue",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Exp_WalkspeedValue", function()
             if v > 5000 then v = 5000 end
             Settings.Exploit.WalkspeedValue = v
-        end })
+        end) end })
 
     ExpSet:CreateToggle({ Text = "JumpPower", Default = false, Index = "Exp_JumpPower",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Exp_JumpPower", function()
             Settings.Exploit.JumpPower = v
             if v then Vars.StartExploitJumpPower() else Vars.StopExploitJumpPower() end
-        end })
+        end) end })
     ExpSet:CreateSlider({ Text = "JumpPower Value", Min = 50, Max = 300, Default = 50, Index = "Exp_JumpPowerValue",
-        Callback = function(v) Settings.Exploit.JumpPowerValue = v end })
+        Callback = function(v) Logger.SafeCall("UI/Exp_JumpPowerValue", function() Settings.Exploit.JumpPowerValue = v end) end })
 
     ExpSet:CreateToggle({ Text = "Noclip", Default = false, Index = "Exp_Noclip",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Exp_Noclip", function()
             Settings.Exploit.Noclip = v
             if v then Vars.StartExploitNoclip() else Vars.StopExploitNoclip() end
-        end })
+        end) end })
 
     ExpSet:CreateToggle({ Text = "Fly", Default = false, Index = "Exp_Fly",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Exp_Fly", function()
             Settings.Exploit.Fly = v
             if v then Vars.StartExploitFly() else Vars.StopExploitFly() end
-        end })
+        end) end })
     ExpSet:CreateSlider({ Text = "Fly Speed", Min = 10, Max = 300, Default = 50, Index = "Exp_FlySpeed",
-        Callback = function(v) Settings.Exploit.FlySpeed = v end })
+        Callback = function(v) Logger.SafeCall("UI/Exp_FlySpeed", function() Settings.Exploit.FlySpeed = v end) end })
 
     ExpSet:CreateToggle({ Text = "Teleport to Cursor", Default = false, Index = "Exp_TeleportToCursor",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/Exp_TeleportToCursor", function()
             Settings.Exploit.TeleportToCursor = v
             if v then Vars.StartExploitTeleport() else Vars.StopExploitTeleport() end
-        end })
+        end) end })
 
     -- ============================================================
     -- Hotkeys Tab
@@ -5749,11 +6091,11 @@ do
     local HotkeyTab = Window:CreateTab("Hotkeys")
     local HKSet = HotkeyTab:CreateSection("Configurable Hotkeys")
     HKSet:CreateDropdown({ Text = "Toggle Menu", Options = {"RightShift","LeftShift","Insert","Home","F1","F2"}, Default = "RightShift", Index = "HK_ToggleMenu",
-        Callback = function(v) if Enum.KeyCode[v] then Settings.Hotkeys.ToggleMenu = Enum.KeyCode[v] end end })
+        Callback = function(v) Logger.SafeCall("UI/HK_ToggleMenu", function() if Enum.KeyCode[v] then Settings.Hotkeys.ToggleMenu = Enum.KeyCode[v] end end) end })
     HKSet:CreateDropdown({ Text = "Helper Toggle", Options = {"Y","U","I","O","P","H","J","K","L"}, Default = "Y", Index = "HK_Helper",
-        Callback = function(v) if Enum.KeyCode[v] then Settings.Hotkeys.Helper = Enum.KeyCode[v] end end })
+        Callback = function(v) Logger.SafeCall("UI/HK_Helper", function() if Enum.KeyCode[v] then Settings.Hotkeys.Helper = Enum.KeyCode[v] end end) end })
     HKSet:CreateDropdown({ Text = "Panic", Options = {"End","Delete","Backspace","F12"}, Default = "End", Index = "HK_Panic",
-        Callback = function(v) if Enum.KeyCode[v] then Settings.Hotkeys.Panic = Enum.KeyCode[v] end end })
+        Callback = function(v) Logger.SafeCall("UI/HK_Panic", function() if Enum.KeyCode[v] then Settings.Hotkeys.Panic = Enum.KeyCode[v] end end) end })
 
     -- ============================================================
     -- Save/Load Tab
@@ -5761,31 +6103,39 @@ do
     local SaveTab = Window:CreateTab("Save/Load")
     local SaveSet = SaveTab:CreateSection("Config Saves")
     SaveSet:CreateButton("Guardar (auto-nombre)", function()
-        local ok = Vars.SaveConfig(nil)
-        if Window.Notify then
-            Window:Notify("Save", ok and ("Guardado: " .. tostring(Settings.Advanced.CurrentSave)) or "Error", 2, ok and "Success" or "Error")
-        end
+        Logger.SafeCall("UI/SaveConfig", function()
+            local ok = Vars.SaveConfig(nil)
+            if Window.Notify then
+                Window:Notify("Save", ok and ("Guardado: " .. tostring(Settings.Advanced.CurrentSave)) or "Error", 2, ok and "Success" or "Error")
+            end
+        end)
     end)
     SaveSet:CreateButton("Cargar (último)", function()
-        local name = Settings.Advanced.CurrentSave
-        if not name then
-            if Window.Notify then Window:Notify("Save", "No hay save actual", 2, "Warning") end
-            return
-        end
-        local ok = Vars.LoadConfig(name)
-        if Window.Notify then Window:Notify("Save", ok and "Cargado" or "Error", 2, ok and "Success" or "Error") end
+        Logger.SafeCall("UI/LoadConfig", function()
+            local name = Settings.Advanced.CurrentSave
+            if not name then
+                if Window.Notify then Window:Notify("Save", "No hay save actual", 2, "Warning") end
+                return
+            end
+            local ok = Vars.LoadConfig(name)
+            if Window.Notify then Window:Notify("Save", ok and "Cargado" or "Error", 2, ok and "Success" or "Error") end
+        end)
     end)
     SaveSet:CreateButton("Listar saves", function()
-        local saves = Vars.ListSaves()
-        if Window.Notify then
-            Window:Notify("Save", "Saves: " .. (#saves > 0 and table.concat(saves, ", ") or "ninguno"), 4, "Info")
-        end
+        Logger.SafeCall("UI/ListSaves", function()
+            local saves = Vars.ListSaves()
+            if Window.Notify then
+                Window:Notify("Save", "Saves: " .. (#saves > 0 and table.concat(saves, ", ") or "ninguno"), 4, "Info")
+            end
+        end)
     end)
     SaveSet:CreateButton("Borrar último", function()
-        if Settings.Advanced.CurrentSave then
-            local ok = Vars.DeleteConfig(Settings.Advanced.CurrentSave)
-            if Window.Notify then Window:Notify("Save", ok and "Borrado" or "Error", 2, ok and "Success" or "Error") end
-        end
+        Logger.SafeCall("UI/DeleteConfig", function()
+            if Settings.Advanced.CurrentSave then
+                local ok = Vars.DeleteConfig(Settings.Advanced.CurrentSave)
+                if Window.Notify then Window:Notify("Save", ok and "Borrado" or "Error", 2, ok and "Success" or "Error") end
+            end
+        end)
     end)
 
     -- ============================================================
@@ -5794,7 +6144,7 @@ do
     local UtilityTab = Window:CreateTab("Utility")
     local UHUD = UtilityTab:CreateSection("HUD")
     UHUD:CreateToggle({ Text = "HUD Enabled", Default = false, Index = "HUD_Enabled",
-        Callback = function(v)
+        Callback = function(v) Logger.SafeCall("UI/HUD_Enabled", function()
             Settings.HUD.Enabled = v
             if not v then
                 if Vars.HudLabel then Vars.HudLabel.Visible = false end
@@ -5802,109 +6152,284 @@ do
                 if Vars.HudBackground then Vars.HudBackground.Visible = false end
                 if Vars.HudAccentLine then Vars.HudAccentLine.Visible = false end
             end
-        end })
+        end) end })
     UHUD:CreateToggle({ Text = "Show FPS", Default = false, Index = "HUD_ShowFPS",
-        Callback = function(v) Settings.HUD.ShowFPS = v end })
+        Callback = function(v) Logger.SafeCall("UI/HUD_ShowFPS", function() Settings.HUD.ShowFPS = v end) end })
     UHUD:CreateToggle({ Text = "Show Ping", Default = false, Index = "HUD_ShowPing",
-        Callback = function(v) Settings.HUD.ShowPing = v end })
+        Callback = function(v) Logger.SafeCall("UI/HUD_ShowPing", function() Settings.HUD.ShowPing = v end) end })
 
     local UPerf = UtilityTab:CreateSection("Performance")
     UPerf:CreateSlider({ Text = "ESP Update Rate (s)", Min = 0.01, Max = 0.2, Default = 0.03, Index = "Perf_ESPRate",
-        Callback = function(v) Settings.Performance.ESPUpdateRate = v end })
+        Callback = function(v) Logger.SafeCall("UI/Perf_ESPRate", function() Settings.Performance.ESPUpdateRate = v end) end })
     UPerf:CreateSlider({ Text = "Skeleton Update Rate (s)", Min = 0.01, Max = 0.2, Default = 0.04, Index = "Perf_SkelRate",
-        Callback = function(v) Settings.Performance.SkeletonUpdateRate = v end })
+        Callback = function(v) Logger.SafeCall("UI/Perf_SkelRate", function() Settings.Performance.SkeletonUpdateRate = v end) end })
 
     local UScript = UtilityTab:CreateSection("Script")
     UScript:CreateButton("Unload", function()
-        _env.TownComplete_Cleanup()
-        if Window.Destroy then Window:Destroy() end
+        Logger.SafeCall("UI/Unload", function()
+            _env.TownComplete_Cleanup()
+            if Window.Destroy then Window:Destroy() end
+        end)
+    end)
+
+    -- ✅ Solara Utils
+    local SolaraUtils = UtilityTab:CreateSection("Solara Utils")
+
+    SolaraUtils:CreateLabel("Executor: " .. tostring(Logger.ExecName) .. " " .. tostring(Logger.ExecVer))
+
+    SolaraUtils:CreateButton("📋 Abrir consola debug (rconsole)", function()
+        Logger.SafeCall("UI/OpenConsole", function()
+            local ok = Logger.OpenConsole()
+            if Window.Notify then
+                Window:Notify("Debug", ok and "Consola abierta (Solara rconsole)" or "No soportado — usando TownDebug",
+                    2, ok and "Success" or "Warning")
+            end
+        end)
+    end)
+
+    SolaraUtils:CreateButton("✖ Cerrar consola debug", function()
+        Logger.SafeCall("UI/CloseConsole", function()
+            Logger.CloseConsole()
+            if Window.Notify then
+                Window:Notify("Debug", "Consola cerrada", 2, "Info")
+            end
+        end)
+    end)
+
+    SolaraUtils:CreateButton("🔕 Toggle TownDebug (print normal)", function()
+        Logger.SafeCall("UI/ToggleDebug", function()
+            local cur = rawget(_env, "TownDebug") or false
+            rawset(_env, "TownDebug", not cur)
+            Logger._silent = cur
+            if Window.Notify then
+                Window:Notify("Debug", (not cur) and "TownDebug ACTIVADO" or "TownDebug DESACTIVADO",
+                    2, "Info")
+            end
+        end)
+    end)
+
+    SolaraUtils:CreateButton("🧪 Test de errores (auto-format)", function()
+        Logger.SafeCall("UI/TestErrors", function()
+            if not Logger._consoleOpen then
+                Logger.OpenConsole()
+            end
+            task.wait(0.1)
+            Logger.Err("TEST/index", "attempt to index nil with 'Humanoid'")
+            task.wait(0.05)
+            Logger.Err("TEST/perm", "SetNetworkOwner: Insufficient permission")
+            task.wait(0.05)
+            Logger.Err("TEST/json", "HttpService: JSONDecode: invalid JSON at position 42")
+            task.wait(0.05)
+            Logger.Err("TEST/generic", "algo raro pasó aquí xyz")
+            task.wait(0.05)
+            local function _fakeBuggy()
+                local t = nil
+                return t.foo.bar
+            end
+            Logger.SafeCall("TEST/SafeCall", _fakeBuggy)
+        end)
+    end)
+
+    SolaraUtils:CreateButton("🧹 Limpiar consola Solara", function()
+        Logger.SafeCall("UI/ClearConsole", function()
+            if type(rconsoleclear) == "function" then
+                pcall(rconsoleclear)
+                if Window.Notify then Window:Notify("Debug", "Consola limpiada", 2, "Info") end
+            end
+        end)
+    end)
+
+    SolaraUtils:CreateButton("📤 Exportar config al portapapeles", function()
+        Logger.SafeCall("UI/ExportConfig", function()
+            if type(setclipboard) ~= "function" then
+                if Window.Notify then Window:Notify("Config", "setclipboard no disponible", 2, "Warning") end
+                return
+            end
+            local ok, encoded = pcall(function()
+                return Vars.HttpService:JSONEncode({
+                    version = "1.0",
+                    timestamp = os.time(),
+                    config = (function()
+                        local out = {}
+                        for sec, data in pairs(Settings) do
+                            if type(data) == "table" then
+                                out[sec] = {}
+                                for k, v in pairs(data) do
+                                    if type(v) == "table" and v.R and v.G and v.B then
+                                        out[sec][k] = {__type = "Color3", R = v.R, G = v.G, B = v.B}
+                                    elseif type(v) == "table" and v.X and v.Y then
+                                        out[sec][k] = {__type = "Vector2", X = v.X, Y = v.Y}
+                                    elseif type(v) == "table" then
+                                        out[sec][k] = v
+                                    else
+                                        out[sec][k] = v
+                                    end
+                                end
+                            end
+                        end
+                        return out
+                    end)(),
+                })
+            end)
+            if not ok or not encoded then
+                if Window.Notify then Window:Notify("Config", "Error al serializar", 2, "Error") end
+                return
+            end
+            local clipOk = pcall(setclipboard, encoded)
+            if Window.Notify then
+                Window:Notify("Config", clipOk and "Config copiada al portapapeles" or "setclipboard falló",
+                    2, clipOk and "Success" or "Error")
+            end
+        end)
+    end)
+
+    SolaraUtils:CreateButton("📥 Importar config del portapapeles", function()
+        Logger.SafeCall("UI/ImportConfig", function()
+            if Window.Notify then
+                Window:Notify("Config", "Pega el JSON en la consola del executor y ejecuta: TownImport()",
+                    4, "Info")
+            end
+        end)
+    end)
+
+    SolaraUtils:CreateButton("🎯 Ver info de ejecución", function()
+        Logger.SafeCall("UI/ShowInfo", function()
+            local info = {
+                "Executor: " .. tostring(Logger.ExecName) .. " " .. tostring(Logger.ExecVer),
+                "Place: " .. tostring(game.PlaceId),
+                "Players: " .. tostring(#Vars.Players:GetPlayers()),
+                "FPS: " .. tostring(Vars.GetCurrentFPS and Vars.GetCurrentFPS() or "?"),
+            }
+            if Window.Notify then
+                Window:Notify("Info", table.concat(info, "  |  "), 5, "Info")
+            end
+        end)
+    end)
+
+    -- ✅ Helper global para importar JSON
+    rawset(_env, "TownImport", function(json)
+        return Logger.SafeCall("TownImport", function()
+            if type(json) ~= "string" or #json < 10 then
+                Logger.Warn("TownImport: JSON inválido")
+                return false
+            end
+            local ok, decoded = pcall(function() return Vars.HttpService:JSONDecode(json) end)
+            if not ok or not decoded or not decoded.config then
+                Logger.Warn("TownImport: no se pudo decodificar")
+                return false
+            end
+            for sec, tbl in pairs(decoded.config) do
+                if type(Settings[sec]) == "table" then
+                    for k, v in pairs(tbl) do
+                        if type(v) == "table" and v.__type == "Color3" then
+                            Settings[sec][k] = Color3.new(v.R, v.G, v.B)
+                        elseif type(v) == "table" and v.__type == "Vector2" then
+                            Settings[sec][k] = Vector2.new(v.X, v.Y)
+                        else
+                            Settings[sec][k] = v
+                        end
+                    end
+                end
+            end
+            if Window.Notify then
+                Window:Notify("Config", "Importado correctamente", 3, "Success")
+            end
+            return true
+        end)
+    end)
+
+    -- ✅ Helper para emitir errores desde fuera del script
+    rawset(_env, "TownError", function(context, err)
+        Logger.Err(context or "external", err)
     end)
 
     -- ============================================================
     -- PANIC (End)
     -- ============================================================
     Vars.panicConn = UserInputService.InputBegan:Connect(function(input, gp)
-        if gp then return end
-        if input.KeyCode == Settings.Hotkeys.Panic then
-            Settings.ESP.Enabled = false
-            Settings.Skeleton.Enabled = false
-            Settings.Aimbot.Enabled = false
-            Settings.AimAssist.Enabled = false
-            Settings.Sync.Enabled = false
-            Settings.HUD.Enabled = false
-            Settings.AntiFall.Enabled = false
-            Settings.Visuals.XRay = false
-            Settings.Visuals.CustomFOV = false
-            Settings.Visuals.HideBody = false
-            Settings.Visuals.HideHands = false
-            Settings.Visuals.HideTool = false
-            Settings.Visuals.BulletTracers = false
-            Settings.Visuals.Crosshair = false
-            Settings.ESP.HeadDots = false
-            Settings.ESP.Items = false
-            Settings.ESP.Weapons = false
-            Settings.Movement.StrafeEnabled = false
-            Settings.Exploit.Spinbot = false
-            Settings.Exploit.Walkspeed = false
-            Settings.Exploit.JumpPower = false
-            Settings.Exploit.Noclip = false
-            Settings.Exploit.Fly = false
-            Settings.Exploit.TeleportToCursor = false
-            Settings.Aimbot.StickyLock = false
-            Settings.Backtrack.Enabled = false
-            Settings.Advanced.Desync_Enabled = false
-            Settings.Advanced.FPSBooster_Enabled = false
-            Settings.Advanced.WX_Enabled = false
-            Settings.Advanced.WP_Enabled = false
-            Settings.Advanced.LF_Enabled = false
-            Settings.Advanced.Truss_Enabled = false
-            Settings.Advanced.Airwalk_Enabled = false
-            Settings.Advanced.Autorespawn_Enabled = false
-            Settings.Advanced.Flight_Enabled = false
-            Settings.Advanced.CamY_Enabled = false
-            Settings.Advanced.CFrameView_Enabled = false
-            Settings.Advanced.QT_Enabled = false
-            Settings.Advanced.Indicator_Enabled = false
-            Settings.Advanced.HitboxViz_Enabled = false
+        Logger.SafeCall("panic", function()
+            if gp then return end
+            if input.KeyCode == Settings.Hotkeys.Panic then
+                Settings.ESP.Enabled = false
+                Settings.Skeleton.Enabled = false
+                Settings.Aimbot.Enabled = false
+                Settings.AimAssist.Enabled = false
+                Settings.Sync.Enabled = false
+                Settings.HUD.Enabled = false
+                Settings.AntiFall.Enabled = false
+                Settings.Visuals.XRay = false
+                Settings.Visuals.CustomFOV = false
+                Settings.Visuals.HideBody = false
+                Settings.Visuals.HideHands = false
+                Settings.Visuals.HideTool = false
+                Settings.Visuals.BulletTracers = false
+                Settings.Visuals.Crosshair = false
+                Settings.ESP.HeadDots = false
+                Settings.ESP.Items = false
+                Settings.ESP.Weapons = false
+                Settings.Movement.StrafeEnabled = false
+                Settings.Exploit.Spinbot = false
+                Settings.Exploit.Walkspeed = false
+                Settings.Exploit.JumpPower = false
+                Settings.Exploit.Noclip = false
+                Settings.Exploit.Fly = false
+                Settings.Exploit.TeleportToCursor = false
+                Settings.Aimbot.StickyLock = false
+                Settings.Backtrack.Enabled = false
+                Settings.Advanced.Desync_Enabled = false
+                Settings.Advanced.FPSBooster_Enabled = false
+                Settings.Advanced.WX_Enabled = false
+                Settings.Advanced.WP_Enabled = false
+                Settings.Advanced.LF_Enabled = false
+                Settings.Advanced.Truss_Enabled = false
+                Settings.Advanced.Airwalk_Enabled = false
+                Settings.Advanced.Autorespawn_Enabled = false
+                Settings.Advanced.Flight_Enabled = false
+                Settings.Advanced.CamY_Enabled = false
+                Settings.Advanced.CFrameView_Enabled = false
+                Settings.Advanced.QT_Enabled = false
+                Settings.Advanced.Indicator_Enabled = false
+                Settings.Advanced.HitboxViz_Enabled = false
 
-            Vars.ClearAllESP()
-            Vars.ClearAllSkeletons()
-            Vars.ClearItemESP()
-            Vars.StopSyncBooster()
-            Vars.StopDesync()
-            Vars.StopAntiFall()
-            Vars.StopNoRecoil()
-            Vars.StopStrafeHvH()
-            Vars.StopExploitSpinbot()
-            Vars.StopExploitWalkspeed()
-            Vars.StopExploitJumpPower()
-            Vars.StopExploitNoclip()
-            Vars.StopExploitFly()
-            Vars.StopExploitTeleport()
-            Vars.StopHideBody()
-            Vars.StopAimAssist()
-            Vars.StopCrosshair()
-            Vars.StopTracerLoop()
-            Vars.ClearAllTracers()
-            if Vars.ResetAllVisuals then Vars.ResetAllVisuals() end
-            Vars.StopXRay()
-            if Vars.ApplyFlight then Vars.ApplyFlight(false) end
-            if Vars.ApplyTruss then Vars.ApplyTruss(false) end
-            if Vars.ApplyAirwalk then Vars.ApplyAirwalk(false) end
-            if Vars.ApplyAutorespawn then Vars.ApplyAutorespawn(false) end
-            if Vars.ApplyWorldXray then Vars.ApplyWorldXray(false) end
-            if Vars.ApplyFPSBooster then Vars.ApplyFPSBooster(false) end
-            if Vars.ClearAllHitboxViz then Vars.ClearAllHitboxViz() end
-            if Vars.HudLabel then Vars.HudLabel.Visible = false end
-            if Vars.HudRightLabel then Vars.HudRightLabel.Visible = false end
-            if Vars.HudBackground then Vars.HudBackground.Visible = false end
-            if Vars.HudAccentLine then Vars.HudAccentLine.Visible = false end
-            if _env.TownUI_Window then
-                pcall(function()
-                    _env.TownUI_Window:Notify("Panic", "Todo desactivado (End)", 3, "Warning")
-                end)
+                Vars.ClearAllESP()
+                Vars.ClearAllSkeletons()
+                Vars.ClearItemESP()
+                Vars.StopSyncBooster()
+                Vars.StopDesync()
+                Vars.StopAntiFall()
+                Vars.StopNoRecoil()
+                Vars.StopStrafeHvH()
+                Vars.StopExploitSpinbot()
+                Vars.StopExploitWalkspeed()
+                Vars.StopExploitJumpPower()
+                Vars.StopExploitNoclip()
+                Vars.StopExploitFly()
+                Vars.StopExploitTeleport()
+                Vars.StopHideBody()
+                Vars.StopAimAssist()
+                Vars.StopCrosshair()
+                Vars.StopTracerLoop()
+                Vars.ClearAllTracers()
+                if Vars.ResetAllVisuals then Vars.ResetAllVisuals() end
+                Vars.StopXRay()
+                if Vars.ApplyFlight then Vars.ApplyFlight(false) end
+                if Vars.ApplyTruss then Vars.ApplyTruss(false) end
+                if Vars.ApplyAirwalk then Vars.ApplyAirwalk(false) end
+                if Vars.ApplyAutorespawn then Vars.ApplyAutorespawn(false) end
+                if Vars.ApplyWorldXray then Vars.ApplyWorldXray(false) end
+                if Vars.ApplyFPSBooster then Vars.ApplyFPSBooster(false) end
+                if Vars.ClearAllHitboxViz then Vars.ClearAllHitboxViz() end
+                if Vars.HudLabel then Vars.HudLabel.Visible = false end
+                if Vars.HudRightLabel then Vars.HudRightLabel.Visible = false end
+                if Vars.HudBackground then Vars.HudBackground.Visible = false end
+                if Vars.HudAccentLine then Vars.HudAccentLine.Visible = false end
+                if _env.TownUI_Window then
+                    pcall(function()
+                        _env.TownUI_Window:Notify("Panic", "Todo desactivado (End)", 3, "Warning")
+                    end)
+                end
             end
-        end
+        end)
     end)
 end
 
@@ -5936,6 +6461,14 @@ do
         pcall(function() Vars.exploitFlyKeyEndConn:Disconnect() end)
         pcall(function() Vars.posHistoryConn:Disconnect() end)
         pcall(function() Vars.lightingChildAddedConn:Disconnect() end)
+
+        -- ✅ Desconectar interceptor de errores
+        rawset(_env, "__TownUnloaded", true)
+        local logConn = rawget(_env, "__TownLogServiceConn")
+        if logConn then
+            pcall(function() logConn:Disconnect() end)
+            rawset(_env, "__TownLogServiceConn", nil)
+        end
 
         Vars.StopNoRecoil()
         Vars.StopSyncBooster()
@@ -5999,29 +6532,39 @@ do
         _env.TownComplete_Loaded = false
     end
 
-    _env.print = realPrint
-    _env.warn  = realWarn
+    -- ✅ Restaurar print/warn originales + cerrar consola debug
+    if Logger and Logger.CloseConsole then
+        pcall(Logger.CloseConsole)
+    end
+    if Logger and Logger.RestoreGlobalPrint then
+        pcall(Logger.RestoreGlobalPrint)
+    else
+        rawset(_env, "print", realPrint)
+        rawset(_env, "warn",  realWarn)
+    end
+
+    rawset(_env, "__TownUnloaded", false)
 
     Vars.StartHideBody()
 
     task.delay(0.6, function()
-        if _env.TownUI_Window and _env.TownUI_Window.GetSaveManager then
-            pcall(function()
+        Logger.SafeCall("init/loadSave", function()
+            if _env.TownUI_Window and _env.TownUI_Window.GetSaveManager then
                 local sm = _env.TownUI_Window:GetSaveManager()
                 sm:Load("default")
-            end)
-        end
+            end
+        end)
     end)
 
     task.delay(1.5, function()
-        if _env.TownUI_Window then
-            pcall(function()
+        Logger.SafeCall("init/notify", function()
+            if _env.TownUI_Window then
                 _env.TownUI_Window:Notify(
-                    "Town Complete v9.9.8",
-                    "RS = Menu | Y = Helper | End = Panic | Aimbot + Aim Assist mejorados",
+                    "Town Complete v9.10",
+                    "RS = Menu | Y = Helper | End = Panic | " .. tostring(Logger.ExecName) .. " detectado",
                     6, "Success"
                 )
-            end)
-        end
+            end
+        end)
     end)
 end
