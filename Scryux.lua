@@ -1,3 +1,6 @@
+-- Town Complete v9.11
+-- ============================================================
+
 local _env = getgenv and getgenv() or _G
 local realPrint = print
 local realWarn  = warn
@@ -5,6 +8,9 @@ local realWarn  = warn
 rawset(_env, "__TownRealPrint", realPrint)
 rawset(_env, "__TownRealWarn",  realWarn)
 
+-- ============================================================
+-- BLOQUE 0: Logger
+-- ============================================================
 local Logger = {
     level = "ERROR",
     prefix = "[TownComplete] ",
@@ -114,7 +120,7 @@ local function _GetStack(level)
         local src = info.short_src or info.source or "?"
         src = src:gsub("^@", "")
         local short = src:match("([^/\\]+)$") or src
-        table.insert(lines, string.format("      · %s : línea %d", short, info.currentline or -1))
+        table.insert(lines, string.format("      - %s : linea %d", short, info.currentline or -1))
     end
     return lines
 end
@@ -159,7 +165,7 @@ local function _EmitError(context, errStr, errLevel, extraStackLevel)
     local category = _ClassifyError(s)
     local color = _CAT_COLORS[category] or "@@LIGHT_RED@@"
     local ctxStr = tostring(context or "?")
-    local sep = "─────────────────────────────────────────────"
+    local sep = "-------------------------------"
 
     if Logger._consoleOpen then
         _SafeRConsolePrint("@@LIGHT_GRAY@@" .. sep .. "\n")
@@ -198,7 +204,7 @@ function Logger.SafeCall(context, fn, ...)
     if not ok then
         local ctxStr = tostring(context or "SafeCall")
         if Logger._consoleOpen then
-            local sep = "─────────────────────────────────────────────"
+            local sep = "-------------------------------"
             _SafeRConsolePrint("@@LIGHT_GRAY@@" .. sep .. "\n")
             _SafeRConsolePrint("@@LIGHT_RED@@[" .. ctxStr .. "]\n")
             _SafeRConsolePrint("@@WHITE@@" .. (result.msg or "unknown") .. "\n")
@@ -243,7 +249,7 @@ do
         local color = isError and (_CAT_COLORS[category] or "@@LIGHT_RED@@") or "@@YELLOW@@"
 
         if Logger._consoleOpen then
-            local sep = "─────────────────────────────────────────────"
+            local sep = "-------------------------------"
             _SafeRConsolePrint("@@LIGHT_GRAY@@" .. sep .. "\n")
             _SafeRConsolePrint(color .. "[Uncaught] " .. (isError and "ERROR" or "WARN") .. "\n")
             _SafeRConsolePrint("@@WHITE@@" .. tostring(message) .. "\n")
@@ -263,6 +269,9 @@ do
     rawset(_env, "__TownLogServiceConn", conn)
 end
 
+-- ============================================================
+-- BLOQUE 1: Helpers + Carga de Scryux UI
+-- ============================================================
 local ScryuxUI
 do
     local function Has(fn)
@@ -357,10 +366,13 @@ end
 if not ScryuxUI then
     _env.print = realPrint
     _env.warn  = realWarn
-    Logger.Error("No se pudo cargar Scryux UI")
+    Logger.Error("No se pudo cargar Scryux UI. Verifica tu conexion a GitHub.")
     return
 end
 
+-- ============================================================
+-- BLOQUE 2: Servicios + Configuracion + Vars
+-- ============================================================
 local Vars = {}
 local Settings = {}
 local BODY_PARTS_ALL = {}
@@ -870,6 +882,9 @@ do
     Vars.BODY_PARTS_ALL = BODY_PARTS_ALL
 end
 
+-- ============================================================
+-- BLOQUE 3: Funciones Core
+-- ============================================================
 do
     local LP = Vars.LP
     local Workspace = Vars.Workspace
@@ -1442,6 +1457,9 @@ do
     end)
 end
 
+-- ============================================================
+-- BLOQUE 4: ESP / Chams / Skeleton / HeadDots / Items / Weapons
+-- ============================================================
 do
     local LP = Vars.LP
     local CoreGui = Vars.CoreGui
@@ -2474,6 +2492,9 @@ do
     Vars.StopCrosshair = StopCrosshair
 end
 
+-- ============================================================
+-- BLOQUE 6: Tracers + No Recoil + X-Ray
+-- ============================================================
 do
     local RunService = Vars.RunService
     local LP = Vars.LP
@@ -2817,6 +2838,9 @@ do
     Vars.StopXRay = StopXRay
 end
 
+-- ============================================================
+-- BLOQUE 7: Target Manager + Aimbot + Aim Assist
+-- ============================================================
 do
     local RunService = Vars.RunService
     local UserInputService = Vars.UserInputService
@@ -3692,6 +3716,9 @@ do
     Vars.StopAimAssist = StopAimAssist
 end
 
+-- ============================================================
+-- BLOQUE 8: Sync + Desync + Anti-Fall + Strafe + Exploits
+-- ============================================================
 do
     local Players = Vars.Players
     local RunService = Vars.RunService
@@ -4071,7 +4098,6 @@ do
         if strafeLeftEndConn then pcall(function() strafeLeftEndConn:Disconnect() end); strafeLeftEndConn = nil end
     end
 
-    -- Spinbot
     local lastSpin = 0
     local spinAngle = 0
     Vars.StartExploitSpinbot = function()
@@ -4432,7 +4458,7 @@ do
         end
         local target = Vars.Players:FindFirstChild(name)
         if not target or target == LP then
-            Logger.Warn("WeldAbuse: target inválido")
+            Logger.Warn("WeldAbuse: target invalido")
             return
         end
 
@@ -4452,7 +4478,7 @@ do
             Logger.SafeCall("weldAbuse/Heartbeat", WeldAbuseTick)
         end)
 
-        Logger.Info("WeldAbuse → " .. name .. " (" .. Settings.Exploit.WeldAbuseType .. ")")
+        Logger.Info("WeldAbuse -> " .. name .. " (" .. Settings.Exploit.WeldAbuseType .. ")")
     end
 
     Vars.StopWeldAbuse = function()
@@ -4646,6 +4672,9 @@ do
     Vars.FlingAllPlayers = FlingAll
 end
 
+-- ============================================================
+-- BLOQUE 8.7: ADVANCED
+-- ============================================================
 do
     local RunService = Vars.RunService
     local UserInputService = Vars.UserInputService
@@ -4698,7 +4727,7 @@ do
                         Vars.antikickOriginal.kick = result
                         Logger.Info("AntiKick ACTIVADO")
                     else
-                        Logger.Warn("AntiKick: hookfunction falló")
+                        Logger.Warn("AntiKick: hookfunction fallo")
                         Settings.Advanced.AntiKick = false
                     end
                 else
@@ -4861,41 +4890,6 @@ do
     end
     Vars.ApplyFPSBooster = ApplyFPSBooster
 
-    local function ShouldExpandHitbox(isHead)
-        local chance = math_clamp(Settings.Advanced.HitChance, 0, 100)
-        if isHead then chance = math_clamp(Settings.Advanced.HeadshotChance, 0, 100) end
-        if chance >= 100 then return true end
-        if chance <= 0 then return false end
-        return math.random(1, 100) <= chance
-    end
-    Vars.ShouldExpandHitbox = ShouldExpandHitbox
-
-    local function CalculateHitboxDiameter(targetPart, cam, screenDist)
-        if not targetPart or not cam then return 1 end
-        local viewport = cam.ViewportSize
-        local H = viewport.Y
-        local vFovRad = math_rad(cam.FieldOfView or 70)
-        local halfVFov = vFovRad / 2
-        local worldDist = (targetPart.Position - cam.CFrame.Position).Magnitude
-        local fovRadius = (cam.ViewportSize.X / 2) * math_tan(math_rad(Settings.Aimbot.FOV / 2)) / math_tan(vFovRad / 2)
-        local alpha = (fovRadius / (H / 2)) * halfVFov
-        local worldHalf = worldDist * math.tan(alpha)
-        local diameter = worldHalf * 2
-
-        local sts = Settings.Advanced.STS_Distance
-        if sts > 0 and worldDist <= sts then
-            diameter = math.max(0.05, math.min(0.1, diameter))
-        end
-        if Settings.Advanced.ScaleToScreen and screenDist and screenDist > 1 then
-            local pixelRadius = math.max(screenDist * 0.5, 1)
-            local scale = screenDist / pixelRadius
-            scale = math_clamp(scale, 1 / Settings.Advanced.MaxExpansion, Settings.Advanced.MaxExpansion)
-            diameter = math.max(0.01, diameter * scale)
-        end
-        return math.max(0.01, diameter)
-    end
-    Vars.CalculateHitboxDiameter = CalculateHitboxDiameter
-
     local function CreateHitboxViz(player, targetPart)
         if not Settings.Advanced.HitboxViz_Enabled then return nil end
         if not player or not targetPart or not targetPart.Parent then return nil end
@@ -4925,30 +4919,6 @@ do
         Vars.hitboxVisualizers[player] = { part = viz }
         return Vars.hitboxVisualizers[player]
     end
-
-    local function UpdateHitboxViz(player, targetPart)
-        if not Settings.Advanced.HitboxViz_Enabled then
-            local data = Vars.hitboxVisualizers[player]
-            if data and data.part then
-                pcall(function() data.part:Destroy() end)
-                Vars.hitboxVisualizers[player] = nil
-            end
-            return
-        end
-        if not targetPart or not targetPart.Parent then return end
-        local data = CreateHitboxViz(player, targetPart)
-        if not data or not data.part or not data.part.Parent then return end
-        data.part.CFrame = targetPart.CFrame
-        data.part.Size = targetPart.Size + V3(
-            Settings.Advanced.HitboxViz_Gap,
-            Settings.Advanced.HitboxViz_Gap,
-            Settings.Advanced.HitboxViz_Gap
-        )
-        data.part.Color = Settings.Advanced.HitboxViz_Color
-        data.part.Transparency = Settings.Advanced.HitboxViz_Transparency
-        data.part.Material = Enum.Material[Settings.Advanced.HitboxViz_Material] or Enum.Material.Neon
-    end
-    Vars.UpdateHitboxViz = UpdateHitboxViz
 
     local function ClearAllHitboxViz()
         for player, data in pairs(Vars.hitboxVisualizers) do
@@ -5041,7 +5011,7 @@ do
         end)
 
         if not ok then
-            Logger.Warn("Indicator: error — " .. tostring(result))
+            Logger.Warn("Indicator: error - " .. tostring(result))
             Settings.Advanced.Indicator_Enabled = false
             return nil
         end
@@ -5400,6 +5370,9 @@ do
     end
 end
 
+-- ============================================================
+-- BLOQUE 8.8: SAVE/LOAD
+-- ============================================================
 do
     local HttpService = Vars.HttpService
     local MarketplaceService = Vars.MarketplaceService
@@ -5575,6 +5548,9 @@ do
     end
 end
 
+-- ============================================================
+-- BLOQUE 8.9: QUICK TOGGLES
+-- ============================================================
 do
     local UserInputService = Vars.UserInputService
     local RunService = Vars.RunService
@@ -5708,7 +5684,7 @@ do
         end)
 
         if not ok then
-            Logger.Warn("QuickToggles: error — " .. tostring(result))
+            Logger.Warn("QuickToggles: error - " .. tostring(result))
         end
     end
 
@@ -5730,6 +5706,9 @@ do
     end)
 end
 
+-- ============================================================
+-- BLOQUE 9: UI (Scryux)
+-- ============================================================
 do
     local Settings = Vars.Settings
     local UserInputService = Vars.UserInputService
@@ -5771,8 +5750,6 @@ do
             Settings.ESP.BoxThickness = v
             for _, esp in pairs(Vars.ESPPool) do esp.box.Thickness = v end
         end) end })
-    ESPMain:CreateSlider({ Text = "Box Padding", Min = 0, Max = 3, Default = 0.5, Index = "ESP_BoxPadding",
-        Callback = function(v) Logger.SafeCall("UI/ESP_BoxPadding", function() Settings.ESP.BoxPadding = v end) end })
 
     local ESPInfo = ESPTab:CreateSection("Info")
     ESPInfo:CreateToggle({ Text = "Health Bar", Default = false, Index = "ESP_Health",
@@ -5802,8 +5779,6 @@ do
         end) end })
     ESPInfo:CreateColorpicker({ Text = "Head Dot Color", Default = Color3.fromRGB(255, 255, 0), Index = "ESP_HeadDotColor",
         Callback = function(c) Logger.SafeCall("UI/ESP_HeadDotColor", function() Settings.ESP.HeadDotColor = c end) end })
-    ESPInfo:CreateSlider({ Text = "Head Dot Radius", Min = 1, Max = 15, Default = 5, Index = "ESP_HeadDotRadius",
-        Callback = function(v) Logger.SafeCall("UI/ESP_HeadDotRadius", function() Settings.ESP.HeadDotRadius = v end) end })
 
     ESPInfo:CreateToggle({ Text = "Items", Default = false, Index = "ESP_Items",
         Callback = function(v) Logger.SafeCall("UI/ESP_Items", function()
@@ -5825,19 +5800,12 @@ do
                                 if success then count = count + 1 end
                             end
                         end
-                        Logger.Info("Items ESP: " .. count .. " items")
                     end)
                 end)
             else
                 Vars.ClearItemESP()
             end
         end) end })
-    ESPInfo:CreateColorpicker({ Text = "Item Color", Default = Color3.fromRGB(255, 165, 0), Index = "ESP_ItemColor",
-        Callback = function(c) Logger.SafeCall("UI/ESP_ItemColor", function() Settings.ESP.ItemColor = c end) end })
-    ESPInfo:CreateSlider({ Text = "Item Max Distance", Min = 50, Max = 2000, Default = 500, Index = "ESP_ItemMaxDist",
-        Callback = function(v) Logger.SafeCall("UI/ESP_ItemMaxDist", function() Settings.ESP.ItemMaxDistance = v end) end })
-    ESPInfo:CreateSlider({ Text = "Item Max Count", Min = 10, Max = 500, Default = 100, Index = "ESP_ItemMaxCount",
-        Callback = function(v) Logger.SafeCall("UI/ESP_ItemMaxCount", function() Settings.ESP.ItemMaxCount = math.floor(v) end) end })
 
     ESPInfo:CreateToggle({ Text = "Weapons", Default = false, Index = "ESP_Weapons",
         Callback = function(v) Logger.SafeCall("UI/ESP_Weapons", function()
@@ -5850,8 +5818,6 @@ do
                 end
             end
         end) end })
-    ESPInfo:CreateColorpicker({ Text = "Weapon Color", Default = Color3.fromRGB(255, 0, 255), Index = "ESP_WeaponColor",
-        Callback = function(c) Logger.SafeCall("UI/ESP_WeaponColor", function() Settings.ESP.WeaponColor = c end) end })
     ESPInfo:CreateToggle({ Text = "ESP Color By Health", Default = false, Index = "ESP_ColorByHealth",
         Callback = function(v) Logger.SafeCall("UI/ESP_ColorByHealth", function() Settings.ESP.ColorByHealth = v end) end })
 
@@ -5865,10 +5831,6 @@ do
         end) end })
     ESPChams:CreateSlider({ Text = "Chams Fill Transparency", Min = 0, Max = 1, Default = 0.25, Index = "ESP_ChamsFill",
         Callback = function(v) Logger.SafeCall("UI/ESP_ChamsFill", function() Settings.ESP.ChamsFillTransparency = v end) end })
-    ESPChams:CreateSlider({ Text = "Chams Outline Transparency", Min = 0, Max = 1, Default = 0, Index = "ESP_ChamsOutlineTransp",
-        Callback = function(v) Logger.SafeCall("UI/ESP_ChamsOutlineTransp", function() Settings.ESP.ChamsOutlineTransparency = v end) end })
-    ESPChams:CreateDropdown({ Text = "Chams Depth Mode", Options = {"AlwaysOnTop", "Occluded"}, Default = "AlwaysOnTop", Index = "ESP_ChamsDepth",
-        Callback = function(v) Logger.SafeCall("UI/ESP_ChamsDepth", function() Settings.ESP.ChamsDepthMode = v end) end })
     ESPChams:CreateColorpicker({ Text = "Chams Outline Color", Default = Color3.new(1, 1, 1), Index = "ESP_ChamsOutlineColor",
         Callback = function(c) Logger.SafeCall("UI/ESP_ChamsOutlineColor", function() Settings.ESP.ChamsOutlineColor = c end) end })
     ESPChams:CreateToggle({ Text = "Wallcheck Chams", Default = false, Index = "ESP_WallcheckChams",
@@ -5882,21 +5844,12 @@ do
             if not v then Vars.ClearAllSkeletons() end
         end) end })
     SkelMain:CreateSlider({ Text = "Thickness", Min = 1, Max = 5, Default = 1, Index = "Skel_Thickness",
-        Callback = function(v) Logger.SafeCall("UI/Skel_Thickness", function()
-            Settings.Skeleton.Thickness = v
-            for _, data in pairs(Vars.ActiveSkeletons) do
-                for _, line in ipairs(data.lines) do line.Thickness = v end
-            end
-        end) end })
-    SkelMain:CreateSlider({ Text = "Max Distance", Min = 50, Max = 2000, Default = 500, Index = "Skel_MaxDist",
-        Callback = function(v) Logger.SafeCall("UI/Skel_MaxDist", function() Settings.Skeleton.MaxDistance = v end) end })
+        Callback = function(v) Logger.SafeCall("UI/Skel_Thickness", function() Settings.Skeleton.Thickness = v end) end })
     SkelMain:CreateDropdown({ Text = "Rig Mode", Options = {"Auto", "R6", "R15"}, Default = "Auto", Index = "Skel_RigMode",
         Callback = function(v) Logger.SafeCall("UI/Skel_RigMode", function()
             Settings.Skeleton.RigMode = v
             Vars.ClearAllSkeletons()
         end) end })
-    SkelMain:CreateToggle({ Text = "Only Visible", Default = false, Index = "Skel_OnlyVisible",
-        Callback = function(v) Logger.SafeCall("UI/Skel_OnlyVisible", function() Settings.Skeleton.OnlyVisible = v end) end })
 
     local AimbotTab = Window:CreateTab("Aimbot")
     local ASet = AimbotTab:CreateSection("Aimbot")
@@ -5908,8 +5861,6 @@ do
         Callback = function(v) Logger.SafeCall("UI/Aim_Priority", function() Settings.Aimbot.Priority = v end) end })
     ASet:CreateToggle({ Text = "Wall Check", Default = false, Index = "Aim_WallCheck",
         Callback = function(v) Logger.SafeCall("UI/Aim_WallCheck", function() Settings.Aimbot.WallCheck = v end) end })
-    ASet:CreateToggle({ Text = "Strict Walls", Default = false, Index = "Aim_StrictWalls",
-        Callback = function(v) Logger.SafeCall("UI/Aim_StrictWalls", function() Settings.Aimbot.StrictWallCheck = v end) end })
     ASet:CreateToggle({ Text = "Team Check", Default = false, Index = "Aim_TeamCheck",
         Callback = function(v) Logger.SafeCall("UI/Aim_TeamCheck", function() Settings.Aimbot.TeamCheck = v end) end })
     ASet:CreateToggle({ Text = "Ignore Passive", Default = false, Index = "Aim_IgnorePassive",
@@ -5932,40 +5883,18 @@ do
         Callback = function(v) Logger.SafeCall("UI/Aim_FOV", function() Settings.Aimbot.FOV = v end) end })
     ASet:CreateToggle({ Text = "Show FOV Circle", Default = false, Index = "Aim_ShowFOV",
         Callback = function(v) Logger.SafeCall("UI/Aim_ShowFOV", function() Settings.Aimbot.ShowFOV = v end) end })
-    ASet:CreateSlider({ Text = "Smoothness Base (0=snap, 1=smooth)", Min = 0, Max = 100, Default = 15, Index = "Aim_SmoothBase",
+    ASet:CreateSlider({ Text = "Smoothness Base", Min = 0, Max = 100, Default = 15, Index = "Aim_SmoothBase",
         Callback = function(v) Logger.SafeCall("UI/Aim_SmoothBase", function() Settings.Aimbot.BaseSmoothness = v / 100 end) end })
     ASet:CreateSlider({ Text = "Smoothness Helper", Min = 0, Max = 100, Default = 15, Index = "Aim_SmoothHelper",
         Callback = function(v) Logger.SafeCall("UI/Aim_SmoothHelper", function() Settings.Aimbot.HelperSmoothness = v / 100 end) end })
-    ASet:CreateToggle({ Text = "Prediction", Default = false, Index = "Aim_Prediction",
-        Callback = function(v) Logger.SafeCall("UI/Aim_Prediction", function() Settings.Aimbot.UsePrediction = v end) end })
-    ASet:CreateSlider({ Text = "Prediction Amount", Min = 0.01, Max = 0.3, Default = 0.13, Index = "Aim_PredAmount",
-        Callback = function(v) Logger.SafeCall("UI/Aim_PredAmount", function() Settings.Aimbot.PredictionAmount = v end) end })
-    ASet:CreateToggle({ Text = "Use Ping Prediction", Default = false, Index = "Aim_PingPrediction",
-        Callback = function(v) Logger.SafeCall("UI/Aim_PingPrediction", function() Settings.Aimbot.UsePingPrediction = v end) end })
+    ASet:CreateToggle({ Text = "Human Mode", Default = false, Index = "Aim_HumanMode",
+        Callback = function(v) Logger.SafeCall("UI/Aim_HumanMode", function() Settings.Aimbot.HumanMode = v end) end })
+    ASet:CreateToggle({ Text = "Humanize", Default = true, Index = "Aim_Humanize",
+        Callback = function(v) Logger.SafeCall("UI/Aim_Humanize", function() Settings.Aimbot.Humanize = v end) end })
     ASet:CreateToggle({ Text = "Anti-360", Default = false, Index = "Aim_Anti360",
         Callback = function(v) Logger.SafeCall("UI/Aim_Anti360", function() Settings.Aimbot.Anti360.Enabled = v end) end })
     ASet:CreateToggle({ Text = "Sticky Target Lock", Default = false, Index = "Aim_StickyLock",
         Callback = function(v) Logger.SafeCall("UI/Aim_StickyLock", function() Settings.Aimbot.StickyLock = v end) end })
-    ASet:CreateSlider({ Text = "Sticky Timeout (s)", Min = 0.5, Max = 10, Default = 2, Index = "Aim_StickyTimeout",
-        Callback = function(v) Logger.SafeCall("UI/Aim_StickyTimeout", function() Settings.Aimbot.StickyTimeout = v end) end })
-
-    ASet:CreateLabel("─── Modo Humano ───")
-    ASet:CreateToggle({ Text = "Human Mode (switch entre targets)", Default = false, Index = "Aim_HumanMode",
-        Callback = function(v) Logger.SafeCall("UI/Aim_HumanMode", function() Settings.Aimbot.HumanMode = v end) end })
-    ASet:CreateSlider({ Text = "Switch Cooldown (s)", Min = 0.1, Max = 2, Default = 0.45, Index = "Aim_SwitchCooldown",
-        Callback = function(v) Logger.SafeCall("UI/Aim_SwitchCooldown", function() Settings.Aimbot.SwitchCooldown = v end) end })
-    ASet:CreateSlider({ Text = "Switch Range (px)", Min = 5, Max = 200, Default = 40, Index = "Aim_SwitchRange",
-        Callback = function(v) Logger.SafeCall("UI/Aim_SwitchRange", function() Settings.Aimbot.SwitchRange = v end) end })
-    ASet:CreateToggle({ Text = "Humanize (micro jitter)", Default = true, Index = "Aim_Humanize",
-        Callback = function(v) Logger.SafeCall("UI/Aim_Humanize", function() Settings.Aimbot.Humanize = v end) end })
-    ASet:CreateSlider({ Text = "Jitter Amount", Min = 0, Max = 2, Default = 0.35, Index = "Aim_Jitter",
-        Callback = function(v) Logger.SafeCall("UI/Aim_Jitter", function() Settings.Aimbot.JitterAmount = v end) end })
-    ASet:CreateSlider({ Text = "Jitter Speed (Hz)", Min = 1, Max = 30, Default = 12, Index = "Aim_JitterSpeed",
-        Callback = function(v) Logger.SafeCall("UI/Aim_JitterSpeed", function() Settings.Aimbot.JitterSpeed = v end) end })
-    ASet:CreateDropdown({ Text = "Ease Style", Options = {"Linear", "EaseOut", "EaseInOut"}, Default = "EaseOut", Index = "Aim_EaseStyle",
-        Callback = function(v) Logger.SafeCall("UI/Aim_EaseStyle", function() Settings.Aimbot.EaseStyle = v end) end })
-    ASet:CreateSlider({ Text = "Transition Duration (s)", Min = 0.05, Max = 0.5, Default = 0.15, Index = "Aim_TransDur",
-        Callback = function(v) Logger.SafeCall("UI/Aim_TransDur", function() Vars.TARGET_TRANSITION_DURATION = v end) end })
 
     local APMSet = AimbotTab:CreateSection("Aim Part Selection")
     APMSet:CreateDropdown({ Text = "Aim Part Mode", Options = Vars.BODY_PARTS_ALL, Default = "Smart Nearest", Index = "Aim_AimPartMode",
@@ -5975,98 +5904,37 @@ do
         end) end })
 
     local SmartSet = AimbotTab:CreateSection("Smart Nearest Zones")
-    SmartSet:CreateSlider({ Text = "Head Zone Bottom (Y)", Min = 0.05, Max = 0.5, Default = 0.22, Index = "Smart_HeadZone",
+    SmartSet:CreateSlider({ Text = "Head Zone Bottom", Min = 0.05, Max = 0.5, Default = 0.22, Index = "Smart_HeadZone",
         Callback = function(v) Logger.SafeCall("UI/Smart_HeadZone", function()
             if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
             Settings.Aimbot.SmartNearest.HeadZone = v
         end) end })
-    SmartSet:CreateSlider({ Text = "Torso Zone Bottom (Y)", Min = 0.3, Max = 0.9, Default = 0.55, Index = "Smart_TorsoZone",
+    SmartSet:CreateSlider({ Text = "Torso Zone Bottom", Min = 0.3, Max = 0.9, Default = 0.55, Index = "Smart_TorsoZone",
         Callback = function(v) Logger.SafeCall("UI/Smart_TorsoZone", function()
             if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
             Settings.Aimbot.SmartNearest.TorsoZone = v
         end) end })
-    SmartSet:CreateSlider({ Text = "Left Arm Zone X", Min = 0.1, Max = 0.5, Default = 0.35, Index = "Smart_LeftArmX",
-        Callback = function(v) Logger.SafeCall("UI/Smart_LeftArmX", function()
-            if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
-            Settings.Aimbot.SmartNearest.LeftArmZoneX = v
-        end) end })
-    SmartSet:CreateSlider({ Text = "Right Arm Zone X", Min = 0.5, Max = 0.9, Default = 0.65, Index = "Smart_RightArmX",
-        Callback = function(v) Logger.SafeCall("UI/Smart_RightArmX", function()
-            if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
-            Settings.Aimbot.SmartNearest.RightArmZoneX = v
-        end) end })
-    SmartSet:CreateToggle({ Text = "Require Visible (raycast)", Default = false, Index = "Smart_RequireVis",
+    SmartSet:CreateToggle({ Text = "Require Visible", Default = false, Index = "Smart_RequireVis",
         Callback = function(v) Logger.SafeCall("UI/Smart_RequireVis", function()
             if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
             Settings.Aimbot.SmartNearest.RequireVisible = v
         end) end })
 
-    local WLSet = AimbotTab:CreateSection("Whitelist")
-    WLSet:CreateButton("Toggle Whitelist (current target)", function()
-        Logger.SafeCall("UI/Whitelist", function()
-            local t = Vars.TargetManager:GetCurrentTarget()
-            if t then
-                Vars.TargetManager:AddToWhitelist(t.player)
-                local state = Vars.TargetManager:IsWhitelisted(t.player) and "añadido" or "removido"
-                if Window.Notify then Window:Notify("Whitelist", t.player.Name .. " " .. state, 2, "Info") end
-            else
-                if Window.Notify then Window:Notify("Whitelist", "Sin target actual", 2, "Warning") end
-            end
-        end)
-    end)
-
     local AimAssistTab = Window:CreateTab("Aim Assist")
     local AASet = AimAssistTab:CreateSection("Aim Assist (Legit)")
-    AASet:CreateLabel("Asistencia suave: sólo tira del aim hacia el enemigo en FOV.")
     AASet:CreateToggle({ Text = "Aim Assist Master", Default = false, Index = "AA_Enabled",
         Callback = function(v) Logger.SafeCall("UI/AA_Enabled", function()
             Settings.AimAssist.Enabled = v
             if v then Vars.StartAimAssist() else Vars.StopAimAssist() end
         end) end })
-
-    local AASection_FOV = AimAssistTab:CreateSection("Zona de asistencia")
-    AASection_FOV:CreateSlider({ Text = "FOV (grados)", Min = 1, Max = 360, Default = 30, Index = "AA_FOV",
+    AASet:CreateSlider({ Text = "FOV", Min = 1, Max = 360, Default = 30, Index = "AA_FOV",
         Callback = function(v) Logger.SafeCall("UI/AA_FOV", function() Settings.AimAssist.FOV = v end) end })
-    AASection_FOV:CreateToggle({ Text = "Mostrar círculo FOV", Default = false, Index = "AA_ShowFOV",
-        Callback = function(v) Logger.SafeCall("UI/AA_ShowFOV", function() Settings.AimAssist.ShowFOV = v end) end })
-    AASection_FOV:CreateColorpicker({ Text = "Color del círculo", Default = Color3.fromRGB(0, 255, 255), Index = "AA_FOVColor",
-        Callback = function(c) Logger.SafeCall("UI/AA_FOVColor", function() Settings.AimAssist.FOVColor = c end) end })
-    AASection_FOV:CreateSlider({ Text = "Distancia máxima (studs)", Min = 50, Max = 2000, Default = 500, Index = "AA_MaxDist",
-        Callback = function(v) Logger.SafeCall("UI/AA_MaxDist", function() Settings.AimAssist.MaxDistance = v end) end })
-
-    local AASection_Feel = AimAssistTab:CreateSection("Sensación")
-    AASection_Feel:CreateSlider({ Text = "Smoothness", Min = 0, Max = 100, Default = 50, Index = "AA_Smoothness",
+    AASet:CreateSlider({ Text = "Smoothness", Min = 0, Max = 100, Default = 50, Index = "AA_Smoothness",
         Callback = function(v) Logger.SafeCall("UI/AA_Smoothness", function() Settings.AimAssist.Smoothness = v / 100 end) end })
-    AASection_Feel:CreateSlider({ Text = "Strength", Min = 0, Max = 100, Default = 60, Index = "AA_Strength",
+    AASet:CreateSlider({ Text = "Strength", Min = 0, Max = 100, Default = 60, Index = "AA_Strength",
         Callback = function(v) Logger.SafeCall("UI/AA_Strength", function() Settings.AimAssist.Strength = v / 100 end) end })
-    AASection_Feel:CreateSlider({ Text = "Max Speed (deg/s)", Min = 1, Max = 180, Default = 30, Index = "AA_MaxSpeed",
+    AASet:CreateSlider({ Text = "Max Speed (deg/s)", Min = 1, Max = 180, Default = 30, Index = "AA_MaxSpeed",
         Callback = function(v) Logger.SafeCall("UI/AA_MaxSpeed", function() Settings.AimAssist.MaxSpeed = v end) end })
-
-    local AASection_Human = AimAssistTab:CreateSection("Humano")
-    AASection_Human:CreateToggle({ Text = "Human Mode", Default = true, Index = "AA_HumanMode",
-        Callback = function(v) Logger.SafeCall("UI/AA_HumanMode", function() Settings.AimAssist.HumanMode = v end) end })
-    AASection_Human:CreateSlider({ Text = "Switch Cooldown (s)", Min = 0.1, Max = 2, Default = 0.5, Index = "AA_SwitchCooldown",
-        Callback = function(v) Logger.SafeCall("UI/AA_SwitchCooldown", function() Settings.AimAssist.SwitchCooldown = v end) end })
-    AASection_Human:CreateSlider({ Text = "Jitter Amount", Min = 0, Max = 2, Default = 0.25, Index = "AA_Jitter",
-        Callback = function(v) Logger.SafeCall("UI/AA_Jitter", function() Settings.AimAssist.JitterAmount = v end) end })
-
-    local AASection_Mouse = AimAssistTab:CreateSection("Mouse")
-    AASection_Mouse:CreateToggle({ Text = "Require Mouse Movement", Default = false, Index = "AA_ReqMouse",
-        Callback = function(v) Logger.SafeCall("UI/AA_ReqMouse", function() Settings.AimAssist.RequireMouseMovement = v end) end })
-    AASection_Mouse:CreateSlider({ Text = "Mouse Threshold (px)", Min = 0, Max = 5, Default = 0.5, Index = "AA_MouseThreshold",
-        Callback = function(v) Logger.SafeCall("UI/AA_MouseThreshold", function() Settings.AimAssist.MouseMovementThreshold = v end) end })
-    AASection_Mouse:CreateSlider({ Text = "Mouse Strength (0-1)", Min = 0, Max = 1, Default = 0.4, Index = "AA_MouseStrength",
-        Callback = function(v) Logger.SafeCall("UI/AA_MouseStrength", function() Settings.AimAssist.MouseStrength = v end) end })
-    AASection_Mouse:CreateDropdown({ Text = "Método", Options = {"Camera", "Mouse"}, Default = "Camera", Index = "AA_Method",
-        Callback = function(v) Logger.SafeCall("UI/AA_Method", function() Settings.AimAssist.UseMouse = (v == "Mouse") end) end })
-
-    local AASection_Filters = AimAssistTab:CreateSection("Filtros")
-    AASection_Filters:CreateToggle({ Text = "Team Check", Default = false, Index = "AA_TeamCheck",
-        Callback = function(v) Logger.SafeCall("UI/AA_TeamCheck", function() Settings.AimAssist.TeamCheck = v end) end })
-    AASection_Filters:CreateToggle({ Text = "Ignore Passive", Default = false, Index = "AA_IgnorePassive",
-        Callback = function(v) Logger.SafeCall("UI/AA_IgnorePassive", function() Settings.AimAssist.IgnorePassive = v end) end })
-    AASection_Filters:CreateToggle({ Text = "Wall Check", Default = false, Index = "AA_WallCheck",
-        Callback = function(v) Logger.SafeCall("UI/AA_WallCheck", function() Settings.AimAssist.WallCheck = v end) end })
 
     local WeaponTab = Window:CreateTab("Weapon Mods")
     local WS = WeaponTab:CreateSection("Weapon")
@@ -6087,10 +5955,6 @@ do
         end) end })
     VLight:CreateToggle({ Text = "No Fog", Default = false, Index = "Vis_NoFog",
         Callback = function(v) Logger.SafeCall("UI/Vis_NoFog", function() Vars.setNoFog(v) end) end })
-    VLight:CreateToggle({ Text = "No Bloom", Default = false, Index = "Vis_NoBloom",
-        Callback = function(v) Logger.SafeCall("UI/Vis_NoBloom", function() Vars.setNoBloom(v) end) end })
-    VLight:CreateToggle({ Text = "No SunRays", Default = false, Index = "Vis_NoSunRays",
-        Callback = function(v) Logger.SafeCall("UI/Vis_NoSunRays", function() Vars.setNoSunRays(v) end) end })
 
     local VFOV = VisualsTab:CreateSection("Camera")
     VFOV:CreateToggle({ Text = "Custom FOV", Default = false, Index = "Vis_CustomFOV",
@@ -6109,35 +5973,17 @@ do
     VHide:CreateToggle({ Text = "Hide Tool", Default = false, Index = "Vis_HideTool",
         Callback = function(v) Logger.SafeCall("UI/Vis_HideTool", function() Settings.Visuals.HideTool = v end) end })
 
-    local VTracer = VisualsTab:CreateSection("Bullet Tracers")
-    VTracer:CreateToggle({ Text = "Bullet Tracers", Default = false, Index = "Vis_BulletTracers",
-        Callback = function(v) Logger.SafeCall("UI/Vis_BulletTracers", function() Settings.Visuals.BulletTracers = v end) end })
-    VTracer:CreateColorpicker({ Text = "Tracer Color", Default = Color3.fromRGB(255, 50, 50), Index = "Vis_TracerColor",
-        Callback = function(c) Logger.SafeCall("UI/Vis_TracerColor", function() Settings.Visuals.TracerColor = c end) end })
-    VTracer:CreateSlider({ Text = "Lifetime (s)", Min = 0.1, Max = 10, Default = 2, Index = "Vis_TracerLifetime",
-        Callback = function(v) Logger.SafeCall("UI/Vis_TracerLifetime", function() Settings.Visuals.TracerLifetime = v end) end })
-    VTracer:CreateSlider({ Text = "Thickness", Min = 1, Max = 10, Default = 2, Index = "Vis_TracerThickness",
-        Callback = function(v) Logger.SafeCall("UI/Vis_TracerThickness", function() Settings.Visuals.TracerThickness = v end) end })
-
     local VCross = VisualsTab:CreateSection("Crosshair")
     VCross:CreateToggle({ Text = "Custom Crosshair", Default = false, Index = "Vis_Crosshair",
         Callback = function(v) Logger.SafeCall("UI/Vis_Crosshair", function()
             Settings.Visuals.Crosshair = v
             if v then Vars.StartCrosshair() else Vars.StopCrosshair() end
         end) end })
-    VCross:CreateColorpicker({ Text = "Crosshair Color", Default = Color3.fromRGB(255, 255, 255), Index = "Vis_CrosshairColor",
-        Callback = function(c) Logger.SafeCall("UI/Vis_CrosshairColor", function() Settings.Visuals.CrosshairColor = c end) end })
-    VCross:CreateColorpicker({ Text = "Enemy Color", Default = Color3.fromRGB(255, 0, 0), Index = "Vis_CrosshairEnemyColor",
-        Callback = function(c) Logger.SafeCall("UI/Vis_CrosshairEnemyColor", function() Settings.Visuals.CrosshairEnemyColor = c end) end })
-    VCross:CreateSlider({ Text = "Size", Min = 2, Max = 20, Default = 8, Index = "Vis_CrosshairSize",
-        Callback = function(v) Logger.SafeCall("UI/Vis_CrosshairSize", function() Settings.Visuals.CrosshairSize = v end) end })
-    VCross:CreateSlider({ Text = "Gap", Min = 0, Max = 20, Default = 4, Index = "Vis_CrosshairGap",
-        Callback = function(v) Logger.SafeCall("UI/Vis_CrosshairGap", function() Settings.Visuals.CrosshairGap = v end) end })
 
     local AdvancedTab = Window:CreateTab("Advanced")
 
     local AntiKickSet = AdvancedTab:CreateSection("AntiKick")
-    AntiKickSet:CreateToggle({ Text = "AntiKick (block kicks)", Default = false, Index = "Adv_AntiKick",
+    AntiKickSet:CreateToggle({ Text = "AntiKick", Default = false, Index = "Adv_AntiKick",
         Callback = function(v) Logger.SafeCall("UI/Adv_AntiKick", function() Vars.ApplyAntiKick(v) end) end })
 
     local VizSet = AdvancedTab:CreateSection("Hitbox Visualizer")
@@ -6154,20 +6000,10 @@ do
     local IndSet = AdvancedTab:CreateSection("Indicator UI")
     IndSet:CreateToggle({ Text = "Enable Indicator", Default = false, Index = "Adv_Indicator",
         Callback = function(v) Logger.SafeCall("UI/Adv_Indicator", function() Settings.Advanced.Indicator_Enabled = v end) end })
-    IndSet:CreateToggle({ Text = "Draggable", Default = false, Index = "Adv_IndicatorDrag",
-        Callback = function(v) Logger.SafeCall("UI/Adv_IndicatorDrag", function() Settings.Advanced.Indicator_Draggable = v end) end })
-
-    local QTSet = AdvancedTab:CreateSection("Quick Toggles")
-    QTSet:CreateToggle({ Text = "Enable Quick Toggles", Default = false, Index = "Adv_QT",
-        Callback = function(v) Logger.SafeCall("UI/Adv_QT", function() Settings.Advanced.QT_Enabled = v end) end })
-    QTSet:CreateToggle({ Text = "Draggable", Default = false, Index = "Adv_QTDrag",
-        Callback = function(v) Logger.SafeCall("UI/Adv_QTDrag", function() Settings.Advanced.QT_Draggable = v end) end })
 
     local CamSet = AdvancedTab:CreateSection("Camera")
     CamSet:CreateToggle({ Text = "Camera Y Offset", Default = false, Index = "Adv_CamY",
         Callback = function(v) Logger.SafeCall("UI/Adv_CamY", function() Settings.Advanced.CamY_Enabled = v end) end })
-    CamSet:CreateSlider({ Text = "Y Offset", Min = -20, Max = 20, Default = 0, Index = "Adv_CamYOffset",
-        Callback = function(v) Logger.SafeCall("UI/Adv_CamYOffset", function() Settings.Advanced.CamY_Offset = v end) end })
     CamSet:CreateToggle({ Text = "CFrame View", Default = false, Index = "Adv_CFrameView",
         Callback = function(v) Logger.SafeCall("UI/Adv_CFrameView", function() Settings.Advanced.CFrameView_Enabled = v end) end })
 
@@ -6181,50 +6017,28 @@ do
         end) end })
     WorldSet:CreateToggle({ Text = "Loop Fire", Default = false, Index = "Adv_LF",
         Callback = function(v) Logger.SafeCall("UI/Adv_LF", function() Settings.Advanced.LF_Enabled = v end) end })
-    WorldSet:CreateDropdown({ Text = "Fire Type", Options = {"TouchInterest", "ClickDetector", "ProximityPrompt"}, Default = "TouchInterest", Index = "Adv_LFType",
-        Callback = function(v) Logger.SafeCall("UI/Adv_LFType", function() Settings.Advanced.LF_Type = v end) end })
 
     local MoveSet = AdvancedTab:CreateSection("Movement Extras")
     MoveSet:CreateToggle({ Text = "Truss", Default = false, Index = "Adv_Truss",
         Callback = function(v) Logger.SafeCall("UI/Adv_Truss", function() Vars.ApplyTruss(v) end) end })
     MoveSet:CreateToggle({ Text = "Airwalk", Default = false, Index = "Adv_Airwalk",
         Callback = function(v) Logger.SafeCall("UI/Adv_Airwalk", function() Vars.ApplyAirwalk(v) end) end })
-    MoveSet:CreateToggle({ Text = "Autorespawn", Default = false, Index = "Adv_Autorespawn",
-        Callback = function(v) Logger.SafeCall("UI/Adv_Autorespawn", function() Vars.ApplyAutorespawn(v) end) end })
     MoveSet:CreateToggle({ Text = "Flight", Default = false, Index = "Adv_Flight",
         Callback = function(v) Logger.SafeCall("UI/Adv_Flight", function() Vars.ApplyFlight(v) end) end })
 
     local SyncSet = AdvancedTab:CreateSection("Sync / Desync / FPS")
-
     SyncSet:CreateToggle({ Text = "FPS Booster", Default = false, Index = "Adv_FPSBooster",
         Callback = function(v) Logger.SafeCall("UI/Adv_FPSBooster", function() Vars.ApplyFPSBooster(v) end) end })
-    SyncSet:CreateDropdown({ Text = "Quality Level", Options = {"Level01","Level02","Level03","Level04","Level05","Level06","Level07","Level08","Level09","Level10"}, Default = "Level01", Index = "Adv_FPSQuality",
-        Callback = function(v) Logger.SafeCall("UI/Adv_FPSQuality", function() Settings.Advanced.FPSBooster_QualityLevel = v end) end })
-    SyncSet:CreateToggle({ Text = "Change Materials", Default = false, Index = "Adv_FPSMaterials",
-        Callback = function(v) Logger.SafeCall("UI/Adv_FPSMaterials", function() Settings.Advanced.FPSBooster_Materials = v end) end })
-    SyncSet:CreateToggle({ Text = "Remove Effects", Default = false, Index = "Adv_FPSEffects",
-        Callback = function(v) Logger.SafeCall("UI/Adv_FPSEffects", function() Settings.Advanced.FPSBooster_RemoveEffects = v end) end })
-
     SyncSet:CreateToggle({ Text = "Sync Booster (network)", Default = false, Index = "Sync_Enabled",
         Callback = function(v) Logger.SafeCall("UI/Sync_Enabled", function()
             Settings.Sync.Enabled = v
             if v then Vars.StartSyncBooster() else Vars.StopSyncBooster() end
         end) end })
-    SyncSet:CreateToggle({ Text = "Sync: Auto-disable on low FPS", Default = false, Index = "Sync_AutoDisable",
-        Callback = function(v) Logger.SafeCall("UI/Sync_AutoDisable", function() Settings.Sync.AutoDisableOnLowFPS = v end) end })
-
     SyncSet:CreateToggle({ Text = "Desync (Seat + Weld)", Default = false, Index = "Adv_Desync",
         Callback = function(v) Logger.SafeCall("UI/Adv_Desync", function()
             Settings.Advanced.Desync_Enabled = v
             if v then Vars.StartDesync() else Vars.StopDesync() end
         end) end })
-
-    local BacktrackTab = Window:CreateTab("Backtrack")
-    local BTSet = BacktrackTab:CreateSection("Backtrack")
-    BTSet:CreateToggle({ Text = "Enable Backtrack", Default = false, Index = "BT_Enabled",
-        Callback = function(v) Logger.SafeCall("UI/BT_Enabled", function() Settings.Backtrack.Enabled = v end) end })
-    BTSet:CreateSlider({ Text = "Delay (s)", Min = 0.02, Max = 0.3, Default = 0.1, Index = "BT_Delay",
-        Callback = function(v) Logger.SafeCall("UI/BT_Delay", function() Settings.Backtrack.Delay = v end) end })
 
     local AntiFallTab = Window:CreateTab("Anti-Fall")
     local AFSection = AntiFallTab:CreateSection("Anti-Fall Damage")
@@ -6234,14 +6048,6 @@ do
             if v then Vars.StartAntiFall() else Vars.StopAntiFall() end
         end) end })
 
-    local MovementTab = Window:CreateTab("Movement")
-    local MSet = MovementTab:CreateSection("Strafe HvH")
-    MSet:CreateToggle({ Text = "Strafe HvH", Default = false, Index = "Mov_Strafe",
-        Callback = function(v) Logger.SafeCall("UI/Mov_Strafe", function()
-            Settings.Movement.StrafeEnabled = v
-            if v then Vars.StartStrafeHvH() else Vars.StopStrafeHvH() end
-        end) end })
-
     local ExploitTab = Window:CreateTab("Exploit")
     local ExpSet = ExploitTab:CreateSection("Movement")
     ExpSet:CreateToggle({ Text = "Spinbot", Default = false, Index = "Exp_Spinbot",
@@ -6249,7 +6055,7 @@ do
             Settings.Exploit.Spinbot = v
             if v then Vars.StartExploitSpinbot() else Vars.StopExploitSpinbot() end
         end) end })
-    ExpSet:CreateSlider({ Text = "Spin Speed (max 5000)", Min = 60, Max = 5000, Default = 1000, Index = "Exp_SpinSpeed",
+    ExpSet:CreateSlider({ Text = "Spin Speed", Min = 60, Max = 5000, Default = 1000, Index = "Exp_SpinSpeed",
         Callback = function(v) Logger.SafeCall("UI/Exp_SpinSpeed", function() Settings.Exploit.SpinbotSpeed = v end) end })
 
     ExpSet:CreateToggle({ Text = "Walkspeed", Default = false, Index = "Exp_Walkspeed",
@@ -6257,7 +6063,7 @@ do
             Settings.Exploit.Walkspeed = v
             if v then Vars.StartExploitWalkspeed() else Vars.StopExploitWalkspeed() end
         end) end })
-    ExpSet:CreateSlider({ Text = "Walkspeed Value (max 5000)", Min = 16, Max = 5000, Default = 16, Index = "Exp_WalkspeedValue",
+    ExpSet:CreateSlider({ Text = "Walkspeed Value", Min = 16, Max = 5000, Default = 16, Index = "Exp_WalkspeedValue",
         Callback = function(v) Logger.SafeCall("UI/Exp_WalkspeedValue", function()
             if v > 5000 then v = 5000 end
             Settings.Exploit.WalkspeedValue = v
@@ -6292,7 +6098,7 @@ do
         end) end })
 
     local ExpExtras = ExploitTab:CreateSection("Local Extras")
-    ExpExtras:CreateToggle({ Text = "Inf Jump (mantén space)", Default = false, Index = "Exp_InfJump",
+    ExpExtras:CreateToggle({ Text = "Inf Jump (manten space)", Default = false, Index = "Exp_InfJump",
         Callback = function(v) Logger.SafeCall("UI/Exp_InfJump", function()
             Settings.Exploit.InfJump = v
             if v then Vars.StartInfJump() else Vars.StopInfJump() end
@@ -6309,7 +6115,6 @@ do
         end) end })
 
     local ExpWeld = ExploitTab:CreateSection("Weld Abuse")
-    ExpWeld:CreateLabel("Selecciona target y elige el tipo. Te pegas a él con PhysicsRepRootPart.")
     ExpWeld:CreateDropdown({
         Text = "Tipo",
         Options = {"Elevator", "HeadSit", "Annoy", "Speed3", "Speed5", "Speed10",
@@ -6367,11 +6172,8 @@ do
         end) end })
 
     local ExpFling = ExploitTab:CreateSection("Fling")
-    ExpFling:CreateLabel("NaN + PhysicsRepRootPart + extremo. Nunca te incluye a ti.")
-
     ExpFling:CreateToggle({ Text = "Only Nearest (target del aimbot)", Default = true, Index = "Exp_FlingNearest",
         Callback = function(v) Logger.SafeCall("UI/Exp_FlingNearest", function() Settings.Exploit.FlingOnlyNearest = v end) end })
-
     ExpFling:CreateSlider({ Text = "Cooldown Loop (s)", Min = 0.1, Max = 3, Default = 0.5, Index = "Exp_FlingCooldown",
         Callback = function(v) Logger.SafeCall("UI/Exp_FlingCooldown", function() Settings.Exploit.FlingCooldown = v end) end })
 
@@ -6392,7 +6194,7 @@ do
             if v then Vars.StartFlingLoop() else Vars.StopFlingLoop() end
         end) end })
 
-    ExpFling:CreateToggle({ Text = "Touch Fling (velocidad absurda)", Default = false, Index = "Exp_TouchFling",
+    ExpFling:CreateToggle({ Text = "Touch Fling", Default = false, Index = "Exp_TouchFling",
         Callback = function(v) Logger.SafeCall("UI/Exp_TouchFling", function()
             if v then Vars.StartTouchFling() else Vars.StopTouchFling() end
         end) end })
@@ -6421,7 +6223,7 @@ do
             end
         end)
     end)
-    SaveSet:CreateButton("Cargar (último)", function()
+    SaveSet:CreateButton("Cargar (ultimo)", function()
         Logger.SafeCall("UI/LoadConfig", function()
             local name = Settings.Advanced.CurrentSave
             if not name then
@@ -6430,14 +6232,6 @@ do
             end
             local ok = Vars.LoadConfig(name)
             if Window.Notify then Window:Notify("Save", ok and "Cargado" or "Error", 2, ok and "Success" or "Error") end
-        end)
-    end)
-    SaveSet:CreateButton("Listar saves", function()
-        Logger.SafeCall("UI/ListSaves", function()
-            local saves = Vars.ListSaves()
-            if Window.Notify then
-                Window:Notify("Save", "Saves: " .. (#saves > 0 and table.concat(saves, ", ") or "ninguno"), 4, "Info")
-            end
         end)
     end)
 
@@ -6455,8 +6249,6 @@ do
         end) end })
     UHUD:CreateToggle({ Text = "Show FPS", Default = false, Index = "HUD_ShowFPS",
         Callback = function(v) Logger.SafeCall("UI/HUD_ShowFPS", function() Settings.HUD.ShowFPS = v end) end })
-    UHUD:CreateToggle({ Text = "Show Ping", Default = false, Index = "HUD_ShowPing",
-        Callback = function(v) Logger.SafeCall("UI/HUD_ShowPing", function() Settings.HUD.ShowPing = v end) end })
 
     local UScript = UtilityTab:CreateSection("Script")
     UScript:CreateButton("Unload", function()
@@ -6469,12 +6261,11 @@ do
     local SolaraUtils = UtilityTab:CreateSection("Solara Utils")
     SolaraUtils:CreateLabel("Executor: " .. tostring(Logger.ExecName) .. " " .. tostring(Logger.ExecVer))
 
-    SolaraUtils:CreateButton("Abrir consola debug (rconsole)", function()
+    SolaraUtils:CreateButton("Abrir consola debug", function()
         Logger.SafeCall("UI/OpenConsole", function()
             local ok = Logger.OpenConsole()
             if Window.Notify then
-                Window:Notify("Debug", ok and "Consola abierta" or "No soportado",
-                    2, ok and "Success" or "Warning")
+                Window:Notify("Debug", ok and "Consola abierta" or "No soportado", 2, ok and "Success" or "Warning")
             end
         end)
     end)
@@ -6493,19 +6284,6 @@ do
             if Window.Notify then
                 Window:Notify("Debug", (not cur) and "ACTIVADO" or "DESACTIVADO", 2, "Info")
             end
-        end)
-    end)
-
-    SolaraUtils:CreateButton("Test de errores", function()
-        Logger.SafeCall("UI/TestErrors", function()
-            if not Logger._consoleOpen then Logger.OpenConsole() end
-            task.wait(0.1)
-            Logger.Err("TEST/index", "attempt to index nil with 'Humanoid'")
-            task.wait(0.05)
-            Logger.Err("TEST/perm", "SetNetworkOwner: Insufficient permission")
-            task.wait(0.05)
-            local function _fakeBuggy() local t = nil return t.foo.bar end
-            Logger.SafeCall("TEST/SafeCall", _fakeBuggy)
         end)
     end)
 
@@ -6614,6 +6392,9 @@ do
     end)
 end
 
+-- ============================================================
+-- BLOQUE 10: Cleanup + Init
+-- ============================================================
 do
     _env.TownComplete_Cleanup = function()
         Vars.isScriptUnloaded = true
