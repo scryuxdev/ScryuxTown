@@ -1,7 +1,3 @@
--- ============================================================
--- Town Complete v9.11 (Scryux UI)
--- ============================================================
-
 local _env = getgenv and getgenv() or _G
 local realPrint = print
 local realWarn  = warn
@@ -9,9 +5,6 @@ local realWarn  = warn
 rawset(_env, "__TownRealPrint", realPrint)
 rawset(_env, "__TownRealWarn",  realWarn)
 
--- ============================================================
--- BLOQUE 0: Logger
--- ============================================================
 local Logger = {
     level = "ERROR",
     prefix = "[TownComplete] ",
@@ -270,9 +263,6 @@ do
     rawset(_env, "__TownLogServiceConn", conn)
 end
 
--- ============================================================
--- BLOQUE 1: Helpers + Carga de Scryux UI
--- ============================================================
 local ScryuxUI
 do
     local function Has(fn)
@@ -371,9 +361,6 @@ if not ScryuxUI then
     return
 end
 
--- ============================================================
--- BLOQUE 2: Servicios + Configuración + Vars
--- ============================================================
 local Vars = {}
 local Settings = {}
 local BODY_PARTS_ALL = {}
@@ -883,9 +870,6 @@ do
     Vars.BODY_PARTS_ALL = BODY_PARTS_ALL
 end
 
--- ============================================================
--- BLOQUE 3: Funciones Core
--- ============================================================
 do
     local LP = Vars.LP
     local Workspace = Vars.Workspace
@@ -1458,9 +1442,6 @@ do
     end)
 end
 
--- ============================================================
--- BLOQUE 4: ESP / Chams / Skeleton / HeadDots / Items / Weapons
--- ============================================================
 do
     local LP = Vars.LP
     local CoreGui = Vars.CoreGui
@@ -2493,9 +2474,6 @@ do
     Vars.StopCrosshair = StopCrosshair
 end
 
--- ============================================================
--- BLOQUE 6: Tracers + No Recoil + X-Ray
--- ============================================================
 do
     local RunService = Vars.RunService
     local LP = Vars.LP
@@ -2839,9 +2817,6 @@ do
     Vars.StopXRay = StopXRay
 end
 
--- ============================================================
--- BLOQUE 7: Target Manager + Aimbot + Aim Assist
--- ============================================================
 do
     local RunService = Vars.RunService
     local UserInputService = Vars.UserInputService
@@ -3717,9 +3692,6 @@ do
     Vars.StopAimAssist = StopAimAssist
 end
 
--- ============================================================
--- BLOQUE 8: Sync + Desync + Anti-Fall + Strafe + Exploits
--- ============================================================
 do
     local Players = Vars.Players
     local RunService = Vars.RunService
@@ -4143,7 +4115,6 @@ do
         end
     end
 
-    -- Walkspeed
     local function ApplyWalkspeedTick()
         if Vars.isScriptUnloaded then return end
         if not Settings.Exploit.Walkspeed then return end
@@ -4358,9 +4329,6 @@ do
         end
     end
 
-    -- ============================================================
-    -- INF JUMP
-    -- ============================================================
     Vars.StartInfJump = function()
         if Vars.infJumpConn then return end
         Vars.infJumpConn = UserInputService.JumpRequest:Connect(function()
@@ -4382,9 +4350,6 @@ do
         end
     end
 
-    -- ============================================================
-    -- NO GRAVITY
-    -- ============================================================
     Vars.StartNoGravity = function()
         if Vars.noGravityOriginal == nil then
             Vars.noGravityOriginal = workspace.Gravity
@@ -4398,9 +4363,6 @@ do
         end
     end
 
-    -- ============================================================
-    -- WATCH
-    -- ============================================================
     Vars.StartWatch = function()
         local cam = Vars.GetCamera()
         if not cam then return end
@@ -4420,9 +4382,6 @@ do
         Vars.watchOriginalCameraType = nil
     end
 
-    -- ============================================================
-    -- WELD ABUSE
-    -- ============================================================
     local function WeldAbuseTick()
         if not Vars.weldAbuseActive then return end
         local target = Vars.weldAbuseTarget
@@ -4526,9 +4485,6 @@ do
         Logger.Info("WeldAbuse DESACTIVADO")
     end
 
-    -- ============================================================
-    -- FLING
-    -- ============================================================
     local function FlingTarget(target)
         if not target or target == LP then return false end
         if not target.Character then return false end
@@ -4690,9 +4646,6 @@ do
     Vars.FlingAllPlayers = FlingAll
 end
 
--- ============================================================
--- BLOQUE 8.7: ADVANCED
--- ============================================================
 do
     local RunService = Vars.RunService
     local UserInputService = Vars.UserInputService
@@ -5447,9 +5400,6 @@ do
     end
 end
 
--- ============================================================
--- BLOQUE 8.8: SAVE/LOAD
--- ============================================================
 do
     local HttpService = Vars.HttpService
     local MarketplaceService = Vars.MarketplaceService
@@ -5625,9 +5575,6 @@ do
     end
 end
 
--- ============================================================
--- BLOQUE 8.9: QUICK TOGGLES
--- ============================================================
 do
     local UserInputService = Vars.UserInputService
     local RunService = Vars.RunService
@@ -5783,9 +5730,6 @@ do
     end)
 end
 
--- ============================================================
--- BLOQUE 9: UI (Scryux)
--- ============================================================
 do
     local Settings = Vars.Settings
     local UserInputService = Vars.UserInputService
@@ -5811,7 +5755,6 @@ do
     _env.TownUI_Window = Window
     Vars.Window = Window
 
-    -- ESP Tab
     local ESPTab = Window:CreateTab("ESP")
     local ESPMain = ESPTab:CreateSection("ESP")
     ESPMain:CreateToggle({ Text = "ESP Master", Default = false, Index = "ESP_Enabled",
@@ -5931,7 +5874,6 @@ do
     ESPChams:CreateToggle({ Text = "Wallcheck Chams", Default = false, Index = "ESP_WallcheckChams",
         Callback = function(v) Logger.SafeCall("UI/ESP_WallcheckChams", function() Settings.ESP.WallcheckChams = v end) end })
 
-    -- Skeleton Tab
     local SkeletonTab = Window:CreateTab("Skeleton")
     local SkelMain = SkeletonTab:CreateSection("Skeleton ESP")
     SkelMain:CreateToggle({ Text = "Skeleton Master", Default = false, Index = "Skel_Enabled",
@@ -5956,7 +5898,6 @@ do
     SkelMain:CreateToggle({ Text = "Only Visible", Default = false, Index = "Skel_OnlyVisible",
         Callback = function(v) Logger.SafeCall("UI/Skel_OnlyVisible", function() Settings.Skeleton.OnlyVisible = v end) end })
 
-    -- Aimbot Tab
     local AimbotTab = Window:CreateTab("Aimbot")
     local ASet = AimbotTab:CreateSection("Aimbot")
     ASet:CreateToggle({ Text = "Aimbot Master", Default = false, Index = "Aim_Enabled",
@@ -6074,7 +6015,6 @@ do
         end)
     end)
 
-    -- Aim Assist Tab
     local AimAssistTab = Window:CreateTab("Aim Assist")
     local AASet = AimAssistTab:CreateSection("Aim Assist (Legit)")
     AASet:CreateLabel("Asistencia suave: sólo tira del aim hacia el enemigo en FOV.")
@@ -6128,7 +6068,6 @@ do
     AASection_Filters:CreateToggle({ Text = "Wall Check", Default = false, Index = "AA_WallCheck",
         Callback = function(v) Logger.SafeCall("UI/AA_WallCheck", function() Settings.AimAssist.WallCheck = v end) end })
 
-    -- Weapon Mods
     local WeaponTab = Window:CreateTab("Weapon Mods")
     local WS = WeaponTab:CreateSection("Weapon")
     WS:CreateToggle({ Text = "No Recoil", Default = false, Index = "W_NoRecoil",
@@ -6137,7 +6076,6 @@ do
             if v then Vars.StartNoRecoil() else Vars.StopNoRecoil() end
         end) end })
 
-    -- Visuals Tab
     local VisualsTab = Window:CreateTab("Visuals")
     local VLight = VisualsTab:CreateSection("Lighting")
     VLight:CreateToggle({ Text = "Full Bright", Default = false, Index = "Vis_FullBright",
@@ -6196,7 +6134,6 @@ do
     VCross:CreateSlider({ Text = "Gap", Min = 0, Max = 20, Default = 4, Index = "Vis_CrosshairGap",
         Callback = function(v) Logger.SafeCall("UI/Vis_CrosshairGap", function() Settings.Visuals.CrosshairGap = v end) end })
 
-    -- Advanced Tab
     local AdvancedTab = Window:CreateTab("Advanced")
 
     local AntiKickSet = AdvancedTab:CreateSection("AntiKick")
@@ -6282,7 +6219,6 @@ do
             if v then Vars.StartDesync() else Vars.StopDesync() end
         end) end })
 
-    -- Backtrack / Anti-Fall / Movement
     local BacktrackTab = Window:CreateTab("Backtrack")
     local BTSet = BacktrackTab:CreateSection("Backtrack")
     BTSet:CreateToggle({ Text = "Enable Backtrack", Default = false, Index = "BT_Enabled",
@@ -6306,7 +6242,6 @@ do
             if v then Vars.StartStrafeHvH() else Vars.StopStrafeHvH() end
         end) end })
 
-    -- Exploit Tab
     local ExploitTab = Window:CreateTab("Exploit")
     local ExpSet = ExploitTab:CreateSection("Movement")
     ExpSet:CreateToggle({ Text = "Spinbot", Default = false, Index = "Exp_Spinbot",
@@ -6410,7 +6345,7 @@ do
         end
     end
 
-    ExpWeld:CreateButton("🔄 Ciclar Target", function()
+    ExpWeld:CreateButton("Ciclar Target", function()
         Logger.SafeCall("UI/weldCycle", RefreshWeldTarget)
     end)
 
@@ -6440,34 +6375,33 @@ do
     ExpFling:CreateSlider({ Text = "Cooldown Loop (s)", Min = 0.1, Max = 3, Default = 0.5, Index = "Exp_FlingCooldown",
         Callback = function(v) Logger.SafeCall("UI/Exp_FlingCooldown", function() Settings.Exploit.FlingCooldown = v end) end })
 
-    ExpFling:CreateButton("⚡ Fling Once", function()
+    ExpFling:CreateButton("Fling Once", function()
         Logger.SafeCall("UI/FlingOnce", function()
             if Vars.FlingOnce then pcall(Vars.FlingOnce) end
         end)
     end)
 
-    ExpFling:CreateButton("💥 Fling All Players", function()
+    ExpFling:CreateButton("Fling All Players", function()
         Logger.SafeCall("UI/FlingAll", function()
             if Vars.FlingAllPlayers then pcall(Vars.FlingAllPlayers) end
         end)
     end)
 
-    ExpFling:CreateToggle({ Text = "🔁 Fling Loop (cada cooldown)", Default = false, Index = "Exp_FlingLoop",
+    ExpFling:CreateToggle({ Text = "Fling Loop (cada cooldown)", Default = false, Index = "Exp_FlingLoop",
         Callback = function(v) Logger.SafeCall("UI/Exp_FlingLoop", function()
             if v then Vars.StartFlingLoop() else Vars.StopFlingLoop() end
         end) end })
 
-    ExpFling:CreateToggle({ Text = "👆 Touch Fling (velocidad absurda)", Default = false, Index = "Exp_TouchFling",
+    ExpFling:CreateToggle({ Text = "Touch Fling (velocidad absurda)", Default = false, Index = "Exp_TouchFling",
         Callback = function(v) Logger.SafeCall("UI/Exp_TouchFling", function()
             if v then Vars.StartTouchFling() else Vars.StopTouchFling() end
         end) end })
 
-    ExpFling:CreateToggle({ Text = "🖱️ Click Fling (Tool al clickear)", Default = false, Index = "Exp_ClickFling",
+    ExpFling:CreateToggle({ Text = "Click Fling (Tool al clickear)", Default = false, Index = "Exp_ClickFling",
         Callback = function(v) Logger.SafeCall("UI/Exp_ClickFling", function()
             if v then Vars.StartClickFling() else Vars.StopClickFling() end
         end) end })
 
-    -- Hotkeys Tab
     local HotkeyTab = Window:CreateTab("Hotkeys")
     local HKSet = HotkeyTab:CreateSection("Configurable Hotkeys")
     HKSet:CreateDropdown({ Text = "Toggle Menu", Options = {"RightShift","LeftShift","Insert","Home","F1","F2"}, Default = "RightShift", Index = "HK_ToggleMenu",
@@ -6477,7 +6411,6 @@ do
     HKSet:CreateDropdown({ Text = "Panic", Options = {"End","Delete","Backspace","F12"}, Default = "End", Index = "HK_Panic",
         Callback = function(v) Logger.SafeCall("UI/HK_Panic", function() if Enum.KeyCode[v] then Settings.Hotkeys.Panic = Enum.KeyCode[v] end end) end })
 
-    -- Save/Load Tab
     local SaveTab = Window:CreateTab("Save/Load")
     local SaveSet = SaveTab:CreateSection("Config Saves")
     SaveSet:CreateButton("Guardar (auto-nombre)", function()
@@ -6508,7 +6441,6 @@ do
         end)
     end)
 
-    -- Utility Tab
     local UtilityTab = Window:CreateTab("Utility")
     local UHUD = UtilityTab:CreateSection("HUD")
     UHUD:CreateToggle({ Text = "HUD Enabled", Default = false, Index = "HUD_Enabled",
@@ -6537,7 +6469,7 @@ do
     local SolaraUtils = UtilityTab:CreateSection("Solara Utils")
     SolaraUtils:CreateLabel("Executor: " .. tostring(Logger.ExecName) .. " " .. tostring(Logger.ExecVer))
 
-    SolaraUtils:CreateButton("📋 Abrir consola debug (rconsole)", function()
+    SolaraUtils:CreateButton("Abrir consola debug (rconsole)", function()
         Logger.SafeCall("UI/OpenConsole", function()
             local ok = Logger.OpenConsole()
             if Window.Notify then
@@ -6547,13 +6479,13 @@ do
         end)
     end)
 
-    SolaraUtils:CreateButton("✖ Cerrar consola debug", function()
+    SolaraUtils:CreateButton("Cerrar consola debug", function()
         Logger.SafeCall("UI/CloseConsole", function()
             Logger.CloseConsole()
         end)
     end)
 
-    SolaraUtils:CreateButton("🔕 Toggle TownDebug", function()
+    SolaraUtils:CreateButton("Toggle TownDebug", function()
         Logger.SafeCall("UI/ToggleDebug", function()
             local cur = rawget(_env, "TownDebug") or false
             rawset(_env, "TownDebug", not cur)
@@ -6564,7 +6496,7 @@ do
         end)
     end)
 
-    SolaraUtils:CreateButton("🧪 Test de errores", function()
+    SolaraUtils:CreateButton("Test de errores", function()
         Logger.SafeCall("UI/TestErrors", function()
             if not Logger._consoleOpen then Logger.OpenConsole() end
             task.wait(0.1)
@@ -6581,7 +6513,6 @@ do
         Logger.Err(context or "external", err)
     end)
 
-    -- PANIC
     Vars.panicConn = UserInputService.InputBegan:Connect(function(input, gp)
         Logger.SafeCall("panic", function()
             if gp then return end
@@ -6683,9 +6614,6 @@ do
     end)
 end
 
--- ============================================================
--- BLOQUE 10: Cleanup + Init
--- ============================================================
 do
     _env.TownComplete_Cleanup = function()
         Vars.isScriptUnloaded = true
