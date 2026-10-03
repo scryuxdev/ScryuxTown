@@ -1,4 +1,7 @@
 --!strict
+-- ============================================================
+-- Town Complete v9.11 (Scryux UI)
+-- ============================================================
 
 local _env = getgenv and getgenv() or _G
 local realPrint = print
@@ -7,6 +10,9 @@ local realWarn  = warn
 rawset(_env, "__TownRealPrint", realPrint)
 rawset(_env, "__TownRealWarn",  realWarn)
 
+-- ============================================================
+-- BLOQUE 0: Logger
+-- ============================================================
 local Logger = {
     level = "ERROR",
     prefix = "[TownComplete] ",
@@ -165,8 +171,8 @@ local function _EmitError(context, errStr, errLevel, extraStackLevel)
 
     if Logger._consoleOpen then
         _SafeRConsolePrint("@@LIGHT_GRAY@@" .. sep .. "\n")
-        _SafeRConsolePrint(color .. "⚠ [" .. ctxStr .. "] " .. category:upper() .. "\n")
-        _SafeRConsolePrint("@@WHITE@@  → " .. s .. "\n")
+        _SafeRConsolePrint(color .. "[" .. ctxStr .. "] " .. category:upper() .. "\n")
+        _SafeRConsolePrint("@@WHITE@@  " .. s .. "\n")
         local stack = _GetStack((errLevel or 2) + (extraStackLevel or 0))
         if #stack > 0 then
             _SafeRConsolePrint("@@LIGHT_GRAY@@  Stack:\n")
@@ -202,7 +208,7 @@ function Logger.SafeCall(context, fn, ...)
         if Logger._consoleOpen then
             local sep = "─────────────────────────────────────────────"
             _SafeRConsolePrint("@@LIGHT_GRAY@@" .. sep .. "\n")
-            _SafeRConsolePrint("@@LIGHT_RED@@⚠ [" .. ctxStr .. "]\n")
+            _SafeRConsolePrint("@@LIGHT_RED@@[" .. ctxStr .. "]\n")
             _SafeRConsolePrint("@@WHITE@@" .. (result.msg or "unknown") .. "\n")
             if result.trace then
                 _SafeRConsolePrint("@@LIGHT_GRAY@@  Trace:\n")
@@ -247,7 +253,7 @@ do
         if Logger._consoleOpen then
             local sep = "─────────────────────────────────────────────"
             _SafeRConsolePrint("@@LIGHT_GRAY@@" .. sep .. "\n")
-            _SafeRConsolePrint(color .. "⚠ [Uncaught] " .. (isError and "ERROR" or "WARN") .. "\n")
+            _SafeRConsolePrint(color .. "[Uncaught] " .. (isError and "ERROR" or "WARN") .. "\n")
             _SafeRConsolePrint("@@WHITE@@" .. tostring(message) .. "\n")
             local stack = _GetStack(2)
             if #stack > 0 then
@@ -265,6 +271,9 @@ do
     rawset(_env, "__TownLogServiceConn", conn)
 end
 
+-- ============================================================
+-- BLOQUE 1: Helpers + Carga de Scryux UI
+-- ============================================================
 local ScryuxUI
 do
     local function Has(fn)
@@ -285,7 +294,7 @@ do
         "https://github.com/scryuxdev/Scryux-Library/raw/main/Scryux-Library.lua?t=" .. tostring(os.time()),
     }
     local CACHE_FILE = "scryux_ui_cache.lua"
-    local CACHE_VERSION = "v9.10"
+    local CACHE_VERSION = "v9.11"
 
     local function SafeRequest(url)
         if Has("request") then
@@ -363,6 +372,9 @@ if not ScryuxUI then
     return
 end
 
+-- ============================================================
+-- BLOQUE 2: Servicios + Configuración + Vars
+-- ============================================================
 local Vars = {}
 local Settings = {}
 local BODY_PARTS_ALL = {}
@@ -516,6 +528,41 @@ do
     Vars.exploitTeleportConn = nil
     Vars.exploitWalkspeedCharConn = nil
     Vars.exploitJumpCharConn = nil
+
+    Vars.infJumpConn = nil
+    Vars.noGravityOriginal = nil
+    Vars.watchOriginalCameraType = nil
+
+    Vars.weldAbuseConn = nil
+    Vars.weldAbuseActive = false
+    Vars.weldAbuseTarget = nil
+    Vars.weldAbuseSavedCFrame = nil
+
+    Vars.flingConn = nil
+    Vars.flingActive = false
+    Vars.flingTarget = nil
+    Vars.flingLastTime = 0
+
+    Vars.touchFlingConn = nil
+    Vars.touchFlingActive = false
+    Vars.clickFlingTool = nil
+    Vars.clickFlingConn = nil
+    Vars.clickFlingActive = false
+
+    Vars.WELD_OFFSETS = {
+        Elevator    = { pos = Vector3.new(0, -3, 0),      rot = CFrame.Angles(math.rad(-90), 0, math.rad(3.34)) },
+        HeadSit     = { pos = Vector3.new(0, 3, 0.9),     rot = CFrame.Angles(0, 0, 0) },
+        Annoy       = { pos = Vector3.new(0, 2, 0),       rot = CFrame.Angles(0, 0, 0), random = true },
+        Speed3      = { pos = Vector3.new(0, 0.7, 1),     rot = CFrame.Angles(0, 0, 0) },
+        Speed5      = { pos = Vector3.new(0, 0.7, 0.5),   rot = CFrame.Angles(0, 0, 0) },
+        Speed10     = { pos = Vector3.new(0, 0.7, 0.35),  rot = CFrame.Angles(0, 0, 0) },
+        Bang        = { pos = Vector3.new(0, 0, 1.1),     rot = CFrame.Angles(0, 0, 0) },
+        Jumpscare   = { pos = Vector3.new(0, 1.5, -0.8),  rot = CFrame.Angles(0, math.rad(180), 0) },
+        MagicCarpet = { pos = Vector3.new(0, -3.6, 0),    rot = CFrame.Angles(math.rad(-90), 0, 0) },
+        Platform    = { pos = Vector3.new(0, -4, 0),      rot = CFrame.Angles(math.rad(-90), 0, 0) },
+        NoJump      = { pos = Vector3.new(0, 3.5, 0),     rot = CFrame.Angles(math.rad(-90), 0, 0) },
+        Rocket      = { pos = Vector3.new(0, -3, 0),      rot = CFrame.Angles(math.rad(90), 0, math.rad(-69)) },
+    }
 
     Vars.positionHistory = {}
     Vars.POS_HISTORY_MAX = 20
@@ -750,6 +797,19 @@ do
             JumpPower = false, JumpPowerValue = 50,
             Noclip = false, Fly = false, FlySpeed = 50,
             TeleportToCursor = false,
+            InfJump = false,
+            NoGravity = false,
+            Watch = false,
+            WeldAbuseEnabled = false,
+            WeldAbuseType = "HeadSit",
+            WeldAbuseTargetName = nil,
+            FlingEnabled = false,
+            FlingVelocity = 1e25,
+            FlingCooldown = 0.5,
+            FlingLoop = false,
+            FlingOnlyNearest = true,
+            TouchFlingEnabled = false,
+            ClickFlingEnabled = false,
         },
         Hotkeys = {
             ToggleMenu = Enum.KeyCode.RightShift,
@@ -824,6 +884,9 @@ do
     Vars.BODY_PARTS_ALL = BODY_PARTS_ALL
 end
 
+-- ============================================================
+-- BLOQUE 3: Funciones Core
+-- ============================================================
 do
     local LP = Vars.LP
     local Workspace = Vars.Workspace
@@ -1396,6 +1459,9 @@ do
     end)
 end
 
+-- ============================================================
+-- BLOQUE 4: ESP / Chams / Skeleton / HeadDots / Items / Weapons
+-- ============================================================
 do
     local LP = Vars.LP
     local CoreGui = Vars.CoreGui
@@ -1916,7 +1982,6 @@ do
     Vars.RebuildActivePlayers = RebuildActivePlayers
     Logger.SafeCall("RebuildActivePlayers", RebuildActivePlayers)
 
-    -- ✅ Loop ESP/Skeleton envuelto en SafeCall
     Vars.espSkeletonConn = Vars.RunService.RenderStepped:Connect(function()
         Logger.SafeCall("espSkeleton/RenderStepped", function()
             if Vars.isScriptUnloaded then return end
@@ -3350,7 +3415,6 @@ do
         end
     end
 
-    -- ✅ Aimbot loop en SafeCall
     Vars.aimbotConn = RunService.RenderStepped:Connect(function()
         Logger.SafeCall("aimbot/RenderStepped", MainAimbotLoop)
     end)
@@ -3446,9 +3510,6 @@ do
         end)
     end)
 
-    -- ============================================================
-    -- AIM ASSIST v9.10
-    -- ============================================================
     local aimAssistEngaged = false
     local lastAASwitch = 0
     local aaJitterSeed = 0
@@ -3541,7 +3602,6 @@ do
 
         if Settings.AimAssist.HumanMode and aimAssistEngaged then
             if (now - lastAASwitch) < (Settings.AimAssist.SwitchCooldown or 0.5) then
-                -- mantiene target actual
             else
                 lastAASwitch = now
             end
@@ -4084,7 +4144,7 @@ do
         end
     end
 
-    -- Walkspeed (máx 5000)
+    -- Walkspeed
     local function ApplyWalkspeedTick()
         if Vars.isScriptUnloaded then return end
         if not Settings.Exploit.Walkspeed then return end
@@ -4298,6 +4358,337 @@ do
             Vars.exploitTeleportConn = nil
         end
     end
+
+    -- ============================================================
+    -- INF JUMP
+    -- ============================================================
+    Vars.StartInfJump = function()
+        if Vars.infJumpConn then return end
+        Vars.infJumpConn = UserInputService.JumpRequest:Connect(function()
+            Logger.SafeCall("infJump/jumpRequest", function()
+                if not Settings.Exploit.InfJump then return end
+                local char = LP.Character
+                if not char then return end
+                local hum = char:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    hum:ChangeState(Enum.HumanoidStateType.Jumping)
+                end
+            end)
+        end)
+    end
+    Vars.StopInfJump = function()
+        if Vars.infJumpConn then
+            pcall(function() Vars.infJumpConn:Disconnect() end)
+            Vars.infJumpConn = nil
+        end
+    end
+
+    -- ============================================================
+    -- NO GRAVITY
+    -- ============================================================
+    Vars.StartNoGravity = function()
+        if Vars.noGravityOriginal == nil then
+            Vars.noGravityOriginal = workspace.Gravity
+        end
+        workspace.Gravity = 0
+    end
+    Vars.StopNoGravity = function()
+        if Vars.noGravityOriginal ~= nil then
+            workspace.Gravity = Vars.noGravityOriginal
+            Vars.noGravityOriginal = nil
+        end
+    end
+
+    -- ============================================================
+    -- WATCH
+    -- ============================================================
+    Vars.StartWatch = function()
+        local cam = Vars.GetCamera()
+        if not cam then return end
+        if Vars.watchOriginalCameraType == nil then
+            Vars.watchOriginalCameraType = cam.CameraType
+        end
+        cam.CameraType = Enum.CameraType.Watch
+    end
+    Vars.StopWatch = function()
+        local cam = Vars.GetCamera()
+        if not cam then return end
+        cam.CameraType = Vars.watchOriginalCameraType or Enum.CameraType.Custom
+        if LP.Character then
+            local hum = LP.Character:FindFirstChildOfClass("Humanoid")
+            if hum then cam.CameraSubject = hum end
+        end
+        Vars.watchOriginalCameraType = nil
+    end
+
+    -- ============================================================
+    -- WELD ABUSE
+    -- ============================================================
+    local function WeldAbuseTick()
+        if not Vars.weldAbuseActive then return end
+        local target = Vars.weldAbuseTarget
+        if not target or not target.Parent then
+            Vars.StopWeldAbuse()
+            return
+        end
+
+        local myChar = LP.Character
+        if not myChar then return end
+        local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+        local myHum = myChar:FindFirstChildOfClass("Humanoid")
+        if not myRoot or not myHum or myHum.Health <= 0 then return end
+
+        local tChar = target.Character
+        if not tChar then return end
+        local tRoot = tChar:FindFirstChild("HumanoidRootPart")
+        if not tRoot then return end
+
+        local cfg = Vars.WELD_OFFSETS[Settings.Exploit.WeldAbuseType] or Vars.WELD_OFFSETS.HeadSit
+        local offset = cfg.pos
+        if cfg.random then
+            local dir = Vector3.new(
+                math.random(-100, 100) / 100,
+                math.random(-100, 100) / 100,
+                math.random(-100, 100) / 100
+            ).Unit
+            offset = dir * (math.random(50, 100) / 100)
+        end
+
+        pcall(function()
+            sethiddenproperty(myRoot, "PhysicsRepRootPart", tRoot)
+        end)
+
+        myRoot.CFrame = tRoot.CFrame * CFrame.new(offset) * cfg.rot
+        myRoot.Velocity = Vector3.new()
+        myRoot.AssemblyLinearVelocity = Vector3.new()
+        myRoot.AssemblyAngularVelocity = Vector3.new()
+        myRoot.RotVelocity = Vector3.new()
+    end
+
+    Vars.StartWeldAbuse = function(targetName)
+        if targetName then Settings.Exploit.WeldAbuseTargetName = targetName end
+        local name = Settings.Exploit.WeldAbuseTargetName
+        if not name or name == "" then
+            Logger.Warn("WeldAbuse: no target seleccionado")
+            return
+        end
+        local target = Vars.Players:FindFirstChild(name)
+        if not target or target == LP then
+            Logger.Warn("WeldAbuse: target inválido")
+            return
+        end
+
+        Vars.weldAbuseTarget = target
+        Vars.weldAbuseActive = true
+        Settings.Exploit.WeldAbuseEnabled = true
+
+        if LP.Character then
+            local root = LP.Character:FindFirstChild("HumanoidRootPart")
+            if root then Vars.weldAbuseSavedCFrame = root.CFrame end
+        end
+
+        if Vars.weldAbuseConn then
+            pcall(function() Vars.weldAbuseConn:Disconnect() end)
+        end
+        Vars.weldAbuseConn = Vars.RunService.Heartbeat:Connect(function()
+            Logger.SafeCall("weldAbuse/Heartbeat", WeldAbuseTick)
+        end)
+
+        Logger.Info("WeldAbuse → " .. name .. " (" .. Settings.Exploit.WeldAbuseType .. ")")
+    end
+
+    Vars.StopWeldAbuse = function()
+        Vars.weldAbuseActive = false
+        Settings.Exploit.WeldAbuseEnabled = false
+
+        if Vars.weldAbuseConn then
+            pcall(function() Vars.weldAbuseConn:Disconnect() end)
+            Vars.weldAbuseConn = nil
+        end
+
+        if LP.Character then
+            local root = LP.Character:FindFirstChild("HumanoidRootPart")
+            if root then
+                pcall(function()
+                    sethiddenproperty(root, "PhysicsRepRootPart", nil)
+                end)
+                if Vars.weldAbuseSavedCFrame then
+                    root.CFrame = Vars.weldAbuseSavedCFrame
+                end
+                root.Velocity = Vector3.new()
+                root.AssemblyLinearVelocity = Vector3.new()
+                root.AssemblyAngularVelocity = Vector3.new()
+                root.RotVelocity = Vector3.new()
+            end
+        end
+
+        Vars.weldAbuseTarget = nil
+        Vars.weldAbuseSavedCFrame = nil
+        Logger.Info("WeldAbuse DESACTIVADO")
+    end
+
+    -- ============================================================
+    -- FLING
+    -- ============================================================
+    local function FlingTarget(target)
+        if not target or target == LP then return false end
+        if not target.Character then return false end
+        local char = target.Character
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not root or not hum then return false end
+
+        pcall(function()
+            if root.SetNetworkOwner then
+                root:SetNetworkOwner(LP)
+            end
+        end)
+
+        pcall(function()
+            sethiddenproperty(hum, "MoveDirectionInternal", Vector3.new(0/0, 0/0, 0/0))
+        end)
+
+        pcall(function()
+            hum:ChangeState(Enum.HumanoidStateType.Physics)
+        end)
+
+        local mag = Settings.Exploit.FlingVelocity or 1e25
+        if mag > 1e25 then mag = 1e25 end
+        local vel = Vector3.new(mag, mag, mag)
+        pcall(function()
+            root.AssemblyLinearVelocity = vel
+            root.AssemblyAngularVelocity = vel
+        end)
+        pcall(function()
+            root.Velocity = vel
+            root.RotVelocity = vel
+        end)
+
+        return true
+    end
+
+    local function FlingAll()
+        for _, p in ipairs(Vars.activePlayers) do
+            if p ~= LP and p.Character then
+                pcall(FlingTarget, p)
+            end
+        end
+    end
+
+    Vars.FlingOnce = function()
+        if Settings.Exploit.FlingOnlyNearest then
+            local t = Vars.TargetManager and Vars.TargetManager:GetCurrentTarget()
+            if t and t.player and t.player ~= LP then
+                pcall(FlingTarget, t.player)
+            end
+        else
+            pcall(FlingAll)
+        end
+    end
+
+    local function FlingLoopTick()
+        if not Settings.Exploit.FlingEnabled then return end
+        local now = os.clock()
+        if (now - Vars.flingLastTime) < Settings.Exploit.FlingCooldown then return end
+        Vars.flingLastTime = now
+        pcall(Vars.FlingOnce)
+    end
+
+    Vars.StartFlingLoop = function()
+        if Vars.flingActive then return end
+        Vars.flingActive = true
+        Settings.Exploit.FlingEnabled = true
+        Vars.flingLastTime = 0
+        Vars.flingConn = Vars.RunService.Heartbeat:Connect(function()
+            Logger.SafeCall("fling/Heartbeat", FlingLoopTick)
+        end)
+        Logger.Info("FlingLoop ACTIVADO")
+    end
+
+    Vars.StopFlingLoop = function()
+        Vars.flingActive = false
+        Settings.Exploit.FlingEnabled = false
+        if Vars.flingConn then
+            pcall(function() Vars.flingConn:Disconnect() end)
+            Vars.flingConn = nil
+        end
+        Logger.Info("FlingLoop DESACTIVADO")
+    end
+
+    Vars.StartTouchFling = function()
+        if Vars.touchFlingConn then return end
+        Vars.touchFlingActive = true
+        Settings.Exploit.TouchFlingEnabled = true
+
+        Vars.touchFlingConn = Vars.RunService.Heartbeat:Connect(function()
+            Logger.SafeCall("touchFling/Heartbeat", function()
+                if not Vars.touchFlingActive then return end
+                local char = LP.Character
+                if not char then return end
+                local root = char:FindFirstChild("HumanoidRootPart")
+                if not root then return end
+
+                local vel = root.Velocity
+                root.Velocity = vel * 10000 + Vector3.new(0, 10000, 0)
+                Vars.RunService.RenderStepped:Wait()
+                root.Velocity = vel
+                Vars.RunService.Stepped:Wait()
+                root.Velocity = vel + Vector3.new(0, 0.1, 0)
+            end)
+        end)
+    end
+
+    Vars.StopTouchFling = function()
+        Vars.touchFlingActive = false
+        Settings.Exploit.TouchFlingEnabled = false
+        if Vars.touchFlingConn then
+            pcall(function() Vars.touchFlingConn:Disconnect() end)
+            Vars.touchFlingConn = nil
+        end
+    end
+
+    Vars.StartClickFling = function()
+        if Vars.clickFlingActive then return end
+        if Vars.clickFlingTool then Vars.clickFlingTool:Destroy() end
+
+        Vars.clickFlingActive = true
+        Settings.Exploit.ClickFlingEnabled = true
+
+        local tool = Instance.new("Tool")
+        tool.Name = "ClickFling"
+        tool.RequiresHandle = false
+        tool.CanBeDropped = false
+        tool.Parent = LP.Backpack
+        Vars.clickFlingTool = tool
+
+        Vars.clickFlingConn = tool.Activated:Connect(function()
+            Logger.SafeCall("clickFling/activated", function()
+                local mouse = LP:GetMouse()
+                if not mouse or not mouse.Target then return end
+                local targetChar = mouse.Target:FindFirstAncestorOfClass("Model")
+                if not targetChar then return end
+                local targetPlayer = Vars.Players:GetPlayerFromCharacter(targetChar)
+                if not targetPlayer or targetPlayer == LP then return end
+                pcall(FlingTarget, targetPlayer)
+            end)
+        end)
+    end
+
+    Vars.StopClickFling = function()
+        Vars.clickFlingActive = false
+        Settings.Exploit.ClickFlingEnabled = false
+        if Vars.clickFlingConn then
+            pcall(function() Vars.clickFlingConn:Disconnect() end)
+            Vars.clickFlingConn = nil
+        end
+        if Vars.clickFlingTool then
+            pcall(function() Vars.clickFlingTool:Destroy() end)
+            Vars.clickFlingTool = nil
+        end
+    end
+
+    Vars.FlingTargetPlayer = FlingTarget
+    Vars.FlingAllPlayers = FlingAll
 end
 
 -- ============================================================
@@ -4353,7 +4744,7 @@ do
                     end)
                     if ok and result then
                         Vars.antikickOriginal.kick = result
-                        Logger.Info("AntiKick ACTIVADO (safe)")
+                        Logger.Info("AntiKick ACTIVADO")
                     else
                         Logger.Warn("AntiKick: hookfunction falló")
                         Settings.Advanced.AntiKick = false
@@ -5403,7 +5794,7 @@ do
     local LP = Vars.LP
 
     local Window = ScryuxUI:CreateWindow({
-        Title = "Town Complete v9.10",
+        Title = "Town Complete v9.11",
         Size = UDim2.new(0, 800, 0, 680),
         Keybind = Settings.Hotkeys.ToggleMenu,
         Theme = "Dark",
@@ -5421,9 +5812,7 @@ do
     _env.TownUI_Window = Window
     Vars.Window = Window
 
-    -- ============================================================
     -- ESP Tab
-    -- ============================================================
     local ESPTab = Window:CreateTab("ESP")
     local ESPMain = ESPTab:CreateSection("ESP")
     ESPMain:CreateToggle({ Text = "ESP Master", Default = false, Index = "ESP_Enabled",
@@ -5543,9 +5932,7 @@ do
     ESPChams:CreateToggle({ Text = "Wallcheck Chams", Default = false, Index = "ESP_WallcheckChams",
         Callback = function(v) Logger.SafeCall("UI/ESP_WallcheckChams", function() Settings.ESP.WallcheckChams = v end) end })
 
-    -- ============================================================
     -- Skeleton Tab
-    -- ============================================================
     local SkeletonTab = Window:CreateTab("Skeleton")
     local SkelMain = SkeletonTab:CreateSection("Skeleton ESP")
     SkelMain:CreateToggle({ Text = "Skeleton Master", Default = false, Index = "Skel_Enabled",
@@ -5570,9 +5957,7 @@ do
     SkelMain:CreateToggle({ Text = "Only Visible", Default = false, Index = "Skel_OnlyVisible",
         Callback = function(v) Logger.SafeCall("UI/Skel_OnlyVisible", function() Settings.Skeleton.OnlyVisible = v end) end })
 
-    -- ============================================================
     -- Aimbot Tab
-    -- ============================================================
     local AimbotTab = Window:CreateTab("Aimbot")
     local ASet = AimbotTab:CreateSection("Aimbot")
     ASet:CreateToggle({ Text = "Aimbot Master", Default = false, Index = "Aim_Enabled",
@@ -5643,15 +6028,13 @@ do
         Callback = function(v) Logger.SafeCall("UI/Aim_TransDur", function() Vars.TARGET_TRANSITION_DURATION = v end) end })
 
     local APMSet = AimbotTab:CreateSection("Aim Part Selection")
-    APMSet:CreateLabel("Smart Nearest: selecciona la parte según la posición del mouse en el bbox del enemigo.")
     APMSet:CreateDropdown({ Text = "Aim Part Mode", Options = Vars.BODY_PARTS_ALL, Default = "Smart Nearest", Index = "Aim_AimPartMode",
         Callback = function(v) Logger.SafeCall("UI/Aim_AimPartMode", function()
             Settings.Aimbot.AimPartMode = v
             Vars.targetTransition.previousPlayer = nil
         end) end })
 
-    local SmartSet = AimbotTab:CreateSection("Smart Nearest - Zones (flexible)")
-    SmartSet:CreateLabel("Zonas verticales (0-1). Mouse dentro del bbox selecciona la parte.")
+    local SmartSet = AimbotTab:CreateSection("Smart Nearest Zones")
     SmartSet:CreateSlider({ Text = "Head Zone Bottom (Y)", Min = 0.05, Max = 0.5, Default = 0.22, Index = "Smart_HeadZone",
         Callback = function(v) Logger.SafeCall("UI/Smart_HeadZone", function()
             if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
@@ -5677,29 +6060,6 @@ do
             if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
             Settings.Aimbot.SmartNearest.RequireVisible = v
         end) end })
-    SmartSet:CreateSlider({ Text = "Max Screen Dist (px) (fallback)", Min = 50, Max = 800, Default = 250, Index = "Smart_MaxScreenDist",
-        Callback = function(v) Logger.SafeCall("UI/Smart_MaxScreenDist", function()
-            if not Settings.Aimbot.SmartNearest then Settings.Aimbot.SmartNearest = {} end
-            Settings.Aimbot.SmartNearest.MaxScreenDist = v
-        end) end })
-
-    local SelSet = AimbotTab:CreateSection("Selective FOV Zones (legacy)")
-    SelSet:CreateSlider({ Text = "Head Zone Bottom", Min = 0, Max = 1, Default = 0.35, Index = "Sel_HeadBottom",
-        Callback = function(v) Logger.SafeCall("UI/Sel_HeadBottom", function() Settings.Aimbot.Selective.HeadZoneBottom = v end) end })
-    SelSet:CreateSlider({ Text = "Torso Zone Bottom", Min = 0, Max = 1, Default = 0.70, Index = "Sel_TorsoBottom",
-        Callback = function(v) Logger.SafeCall("UI/Sel_TorsoBottom", function() Settings.Aimbot.Selective.TorsoZoneBottom = v end) end })
-    SelSet:CreateSlider({ Text = "Left Arm Zone Right", Min = 0, Max = 1, Default = 0.35, Index = "Sel_LeftArmRight",
-        Callback = function(v) Logger.SafeCall("UI/Sel_LeftArmRight", function() Settings.Aimbot.Selective.LeftArmZoneRight = v end) end })
-    SelSet:CreateSlider({ Text = "Right Arm Zone Left", Min = 0, Max = 1, Default = 0.65, Index = "Sel_RightArmLeft",
-        Callback = function(v) Logger.SafeCall("UI/Sel_RightArmLeft", function() Settings.Aimbot.Selective.RightArmZoneLeft = v end) end })
-
-    local HybSet = AimbotTab:CreateSection("Hybrid Mode")
-    HybSet:CreateDropdown({ Text = "Hybrid Base Part", Options = {"Head", "UpperTorso", "Torso", "LowerTorso"}, Default = "Head", Index = "Hyb_BasePart",
-        Callback = function(v) Logger.SafeCall("UI/Hyb_BasePart", function() Settings.Aimbot.Hybrid.BasePart = v end) end })
-    HybSet:CreateSlider({ Text = "Vertical Bias Threshold", Min = 0, Max = 1, Default = 0.15, Index = "Hyb_VertBias",
-        Callback = function(v) Logger.SafeCall("UI/Hyb_VertBias", function() Settings.Aimbot.Hybrid.VerticalBiasThreshold = v end) end })
-    HybSet:CreateToggle({ Text = "Allow Return (up)", Default = false, Index = "Hyb_AllowReturn",
-        Callback = function(v) Logger.SafeCall("UI/Hyb_AllowReturn", function() Settings.Aimbot.Hybrid.AllowReturn = v end) end })
 
     local WLSet = AimbotTab:CreateSection("Whitelist")
     WLSet:CreateButton("Toggle Whitelist (current target)", function()
@@ -5715,20 +6075,18 @@ do
         end)
     end)
 
-    -- ============================================================
     -- Aim Assist Tab
-    -- ============================================================
     local AimAssistTab = Window:CreateTab("Aim Assist")
     local AASet = AimAssistTab:CreateSection("Aim Assist (Legit)")
     AASet:CreateLabel("Asistencia suave: sólo tira del aim hacia el enemigo en FOV.")
-    AASet:CreateToggle({ Text = "🎯 Aim Assist Master", Default = false, Index = "AA_Enabled",
+    AASet:CreateToggle({ Text = "Aim Assist Master", Default = false, Index = "AA_Enabled",
         Callback = function(v) Logger.SafeCall("UI/AA_Enabled", function()
             Settings.AimAssist.Enabled = v
             if v then Vars.StartAimAssist() else Vars.StopAimAssist() end
         end) end })
 
     local AASection_FOV = AimAssistTab:CreateSection("Zona de asistencia")
-    AASection_FOV:CreateSlider({ Text = "FOV (grados) - tamaño del círculo", Min = 1, Max = 360, Default = 30, Index = "AA_FOV",
+    AASection_FOV:CreateSlider({ Text = "FOV (grados)", Min = 1, Max = 360, Default = 30, Index = "AA_FOV",
         Callback = function(v) Logger.SafeCall("UI/AA_FOV", function() Settings.AimAssist.FOV = v end) end })
     AASection_FOV:CreateToggle({ Text = "Mostrar círculo FOV", Default = false, Index = "AA_ShowFOV",
         Callback = function(v) Logger.SafeCall("UI/AA_ShowFOV", function() Settings.AimAssist.ShowFOV = v end) end })
@@ -5737,36 +6095,29 @@ do
     AASection_FOV:CreateSlider({ Text = "Distancia máxima (studs)", Min = 50, Max = 2000, Default = 500, Index = "AA_MaxDist",
         Callback = function(v) Logger.SafeCall("UI/AA_MaxDist", function() Settings.AimAssist.MaxDistance = v end) end })
 
-    local AASection_Feel = AimAssistTab:CreateSection("Sensación (feel)")
-    AASection_Feel:CreateLabel("Smoothness: 0 = imán · 1 = casi sin ayuda")
+    local AASection_Feel = AimAssistTab:CreateSection("Sensación")
     AASection_Feel:CreateSlider({ Text = "Smoothness", Min = 0, Max = 100, Default = 50, Index = "AA_Smoothness",
         Callback = function(v) Logger.SafeCall("UI/AA_Smoothness", function() Settings.AimAssist.Smoothness = v / 100 end) end })
-    AASection_Feel:CreateLabel("Strength: cuánto tira hacia el enemigo")
     AASection_Feel:CreateSlider({ Text = "Strength", Min = 0, Max = 100, Default = 60, Index = "AA_Strength",
         Callback = function(v) Logger.SafeCall("UI/AA_Strength", function() Settings.AimAssist.Strength = v / 100 end) end })
-    AASection_Feel:CreateLabel("Max Speed: velocidad máx de rotación (grados/s)")
     AASection_Feel:CreateSlider({ Text = "Max Speed (deg/s)", Min = 1, Max = 180, Default = 30, Index = "AA_MaxSpeed",
         Callback = function(v) Logger.SafeCall("UI/AA_MaxSpeed", function() Settings.AimAssist.MaxSpeed = v end) end })
 
     local AASection_Human = AimAssistTab:CreateSection("Humano")
-    AASection_Human:CreateToggle({ Text = "Human Mode (switch suave entre targets)", Default = true, Index = "AA_HumanMode",
+    AASection_Human:CreateToggle({ Text = "Human Mode", Default = true, Index = "AA_HumanMode",
         Callback = function(v) Logger.SafeCall("UI/AA_HumanMode", function() Settings.AimAssist.HumanMode = v end) end })
     AASection_Human:CreateSlider({ Text = "Switch Cooldown (s)", Min = 0.1, Max = 2, Default = 0.5, Index = "AA_SwitchCooldown",
         Callback = function(v) Logger.SafeCall("UI/AA_SwitchCooldown", function() Settings.AimAssist.SwitchCooldown = v end) end })
-    AASection_Human:CreateSlider({ Text = "Switch Range (px)", Min = 5, Max = 200, Default = 30, Index = "AA_SwitchRange",
-        Callback = function(v) Logger.SafeCall("UI/AA_SwitchRange", function() Settings.AimAssist.SwitchRange = v end) end })
     AASection_Human:CreateSlider({ Text = "Jitter Amount", Min = 0, Max = 2, Default = 0.25, Index = "AA_Jitter",
         Callback = function(v) Logger.SafeCall("UI/AA_Jitter", function() Settings.AimAssist.JitterAmount = v end) end })
 
     local AASection_Mouse = AimAssistTab:CreateSection("Mouse")
-    AASection_Mouse:CreateToggle({ Text = "Require Mouse Movement (solo si mueves)", Default = false, Index = "AA_ReqMouse",
+    AASection_Mouse:CreateToggle({ Text = "Require Mouse Movement", Default = false, Index = "AA_ReqMouse",
         Callback = function(v) Logger.SafeCall("UI/AA_ReqMouse", function() Settings.AimAssist.RequireMouseMovement = v end) end })
     AASection_Mouse:CreateSlider({ Text = "Mouse Threshold (px)", Min = 0, Max = 5, Default = 0.5, Index = "AA_MouseThreshold",
         Callback = function(v) Logger.SafeCall("UI/AA_MouseThreshold", function() Settings.AimAssist.MouseMovementThreshold = v end) end })
     AASection_Mouse:CreateSlider({ Text = "Mouse Strength (0-1)", Min = 0, Max = 1, Default = 0.4, Index = "AA_MouseStrength",
         Callback = function(v) Logger.SafeCall("UI/AA_MouseStrength", function() Settings.AimAssist.MouseStrength = v end) end })
-    AASection_Mouse:CreateSlider({ Text = "Movement Memory (s)", Min = 0.05, Max = 1, Default = 0.2, Index = "AA_MovementMemory",
-        Callback = function(v) Logger.SafeCall("UI/AA_MovementMemory", function() Settings.AimAssist.MovementMemory = v end) end })
     AASection_Mouse:CreateDropdown({ Text = "Método", Options = {"Camera", "Mouse"}, Default = "Camera", Index = "AA_Method",
         Callback = function(v) Logger.SafeCall("UI/AA_Method", function() Settings.AimAssist.UseMouse = (v == "Mouse") end) end })
 
@@ -5778,9 +6129,7 @@ do
     AASection_Filters:CreateToggle({ Text = "Wall Check", Default = false, Index = "AA_WallCheck",
         Callback = function(v) Logger.SafeCall("UI/AA_WallCheck", function() Settings.AimAssist.WallCheck = v end) end })
 
-    -- ============================================================
     -- Weapon Mods
-    -- ============================================================
     local WeaponTab = Window:CreateTab("Weapon Mods")
     local WS = WeaponTab:CreateSection("Weapon")
     WS:CreateToggle({ Text = "No Recoil", Default = false, Index = "W_NoRecoil",
@@ -5789,9 +6138,7 @@ do
             if v then Vars.StartNoRecoil() else Vars.StopNoRecoil() end
         end) end })
 
-    -- ============================================================
     -- Visuals Tab
-    -- ============================================================
     local VisualsTab = Window:CreateTab("Visuals")
     local VLight = VisualsTab:CreateSection("Lighting")
     VLight:CreateToggle({ Text = "Full Bright", Default = false, Index = "Vis_FullBright",
@@ -5807,12 +6154,6 @@ do
         Callback = function(v) Logger.SafeCall("UI/Vis_NoBloom", function() Vars.setNoBloom(v) end) end })
     VLight:CreateToggle({ Text = "No SunRays", Default = false, Index = "Vis_NoSunRays",
         Callback = function(v) Logger.SafeCall("UI/Vis_NoSunRays", function() Vars.setNoSunRays(v) end) end })
-    VLight:CreateButton("Reset All Visuals", function()
-        Logger.SafeCall("UI/ResetVisuals", function()
-            if Vars.ResetAllVisuals then Vars.ResetAllVisuals() end
-            if Window.Notify then Window:Notify("Visuals", "Reset", 2, "Success") end
-        end)
-    end)
 
     local VFOV = VisualsTab:CreateSection("Camera")
     VFOV:CreateToggle({ Text = "Custom FOV", Default = false, Index = "Vis_CustomFOV",
@@ -5840,10 +6181,6 @@ do
         Callback = function(v) Logger.SafeCall("UI/Vis_TracerLifetime", function() Settings.Visuals.TracerLifetime = v end) end })
     VTracer:CreateSlider({ Text = "Thickness", Min = 1, Max = 10, Default = 2, Index = "Vis_TracerThickness",
         Callback = function(v) Logger.SafeCall("UI/Vis_TracerThickness", function() Settings.Visuals.TracerThickness = v end) end })
-    VTracer:CreateSlider({ Text = "Max Distance", Min = 50, Max = 2000, Default = 500, Index = "Vis_TracerMaxDist",
-        Callback = function(v) Logger.SafeCall("UI/Vis_TracerMaxDist", function() Settings.Visuals.TracerMaxDistance = v end) end })
-    VTracer:CreateSlider({ Text = "Max Active Tracers", Min = 5, Max = 200, Default = 40, Index = "Vis_MaxActiveTracers",
-        Callback = function(v) Logger.SafeCall("UI/Vis_MaxActiveTracers", function() Settings.Visuals.MaxActiveTracers = math.floor(v) end) end })
 
     local VCross = VisualsTab:CreateSection("Crosshair")
     VCross:CreateToggle({ Text = "Custom Crosshair", Default = false, Index = "Vis_Crosshair",
@@ -5857,31 +6194,15 @@ do
         Callback = function(c) Logger.SafeCall("UI/Vis_CrosshairEnemyColor", function() Settings.Visuals.CrosshairEnemyColor = c end) end })
     VCross:CreateSlider({ Text = "Size", Min = 2, Max = 20, Default = 8, Index = "Vis_CrosshairSize",
         Callback = function(v) Logger.SafeCall("UI/Vis_CrosshairSize", function() Settings.Visuals.CrosshairSize = v end) end })
-    VCross:CreateSlider({ Text = "Thickness", Min = 1, Max = 5, Default = 2, Index = "Vis_CrosshairThickness",
-        Callback = function(v) Logger.SafeCall("UI/Vis_CrosshairThickness", function() Settings.Visuals.CrosshairThickness = v end) end })
     VCross:CreateSlider({ Text = "Gap", Min = 0, Max = 20, Default = 4, Index = "Vis_CrosshairGap",
         Callback = function(v) Logger.SafeCall("UI/Vis_CrosshairGap", function() Settings.Visuals.CrosshairGap = v end) end })
 
-    -- ============================================================
     -- Advanced Tab
-    -- ============================================================
     local AdvancedTab = Window:CreateTab("Advanced")
 
     local AntiKickSet = AdvancedTab:CreateSection("AntiKick")
     AntiKickSet:CreateToggle({ Text = "AntiKick (block kicks)", Default = false, Index = "Adv_AntiKick",
         Callback = function(v) Logger.SafeCall("UI/Adv_AntiKick", function() Vars.ApplyAntiKick(v) end) end })
-
-    local HBSet = AdvancedTab:CreateSection("Hitbox Advanced")
-    HBSet:CreateSlider({ Text = "Hit Chance %", Min = 0, Max = 100, Default = 100, Index = "Adv_HitChance",
-        Callback = function(v) Logger.SafeCall("UI/Adv_HitChance", function() Settings.Advanced.HitChance = math.floor(v) end) end })
-    HBSet:CreateSlider({ Text = "Headshot Chance %", Min = 0, Max = 100, Default = 100, Index = "Adv_HeadshotChance",
-        Callback = function(v) Logger.SafeCall("UI/Adv_HeadshotChance", function() Settings.Advanced.HeadshotChance = math.floor(v) end) end })
-    HBSet:CreateSlider({ Text = "STS Distance", Min = 0, Max = 50, Default = 5, Index = "Adv_STS",
-        Callback = function(v) Logger.SafeCall("UI/Adv_STS", function() Settings.Advanced.STS_Distance = v end) end })
-    HBSet:CreateToggle({ Text = "Scale To Screen", Default = false, Index = "Adv_ScaleToScreen",
-        Callback = function(v) Logger.SafeCall("UI/Adv_ScaleToScreen", function() Settings.Advanced.ScaleToScreen = v end) end })
-    HBSet:CreateSlider({ Text = "Max Expansion", Min = 1, Max = 30, Default = 8, Index = "Adv_MaxExpansion",
-        Callback = function(v) Logger.SafeCall("UI/Adv_MaxExpansion", function() Settings.Advanced.MaxExpansion = v end) end })
 
     local VizSet = AdvancedTab:CreateSection("Hitbox Visualizer")
     VizSet:CreateToggle({ Text = "Enable Hitbox Visualizer", Default = false, Index = "Adv_HitboxViz",
@@ -5891,14 +6212,8 @@ do
         end) end })
     VizSet:CreateDropdown({ Text = "Shape", Options = {"Block", "Sphere", "Cylinder"}, Default = "Block", Index = "Adv_VizShape",
         Callback = function(v) Logger.SafeCall("UI/Adv_VizShape", function() Settings.Advanced.HitboxViz_Shape = v end) end })
-    VizSet:CreateDropdown({ Text = "Material", Options = {"Neon", "ForceField", "Glass", "Plastic", "Metal", "DiamondPlate"}, Default = "Neon", Index = "Adv_VizMat",
-        Callback = function(v) Logger.SafeCall("UI/Adv_VizMat", function() Settings.Advanced.HitboxViz_Material = v end) end })
-    VizSet:CreateSlider({ Text = "Transparency", Min = 0, Max = 1, Default = 0.6, Index = "Adv_VizTrans",
-        Callback = function(v) Logger.SafeCall("UI/Adv_VizTrans", function() Settings.Advanced.HitboxViz_Transparency = v end) end })
     VizSet:CreateColorpicker({ Text = "Color", Default = Color3.fromRGB(255, 0, 0), Index = "Adv_VizColor",
         Callback = function(c) Logger.SafeCall("UI/Adv_VizColor", function() Settings.Advanced.HitboxViz_Color = c end) end })
-    VizSet:CreateSlider({ Text = "Gap", Min = 0, Max = 3, Default = 0.4, Index = "Adv_VizGap",
-        Callback = function(v) Logger.SafeCall("UI/Adv_VizGap", function() Settings.Advanced.HitboxViz_Gap = v end) end })
 
     local IndSet = AdvancedTab:CreateSection("Indicator UI")
     IndSet:CreateToggle({ Text = "Enable Indicator", Default = false, Index = "Adv_Indicator",
@@ -5921,29 +6236,17 @@ do
         Callback = function(v) Logger.SafeCall("UI/Adv_CFrameView", function() Settings.Advanced.CFrameView_Enabled = v end) end })
 
     local WorldSet = AdvancedTab:CreateSection("World")
-    WorldSet:CreateToggle({ Text = "World Proximity (auto Prompts)", Default = false, Index = "Adv_WP",
+    WorldSet:CreateToggle({ Text = "World Proximity", Default = false, Index = "Adv_WP",
         Callback = function(v) Logger.SafeCall("UI/Adv_WP", function() Settings.Advanced.WP_Enabled = v end) end })
-    WorldSet:CreateSlider({ Text = "WP Max Activation", Min = 0, Max = 500, Default = 100, Index = "Adv_WPMax",
-        Callback = function(v) Logger.SafeCall("UI/Adv_WPMax", function() Settings.Advanced.WP_MaxActivation = math.floor(v) end) end })
     WorldSet:CreateToggle({ Text = "World Xray", Default = false, Index = "Adv_WX",
         Callback = function(v) Logger.SafeCall("UI/Adv_WX", function()
             Settings.Advanced.WX_Enabled = v
             Vars.ApplyWorldXray(v)
         end) end })
-    WorldSet:CreateSlider({ Text = "Xray Transparency", Min = 0, Max = 1, Default = 0.5, Index = "Adv_WXTrans",
-        Callback = function(v) Logger.SafeCall("UI/Adv_WXTrans", function()
-            Settings.Advanced.WX_Transparency = v
-            if Settings.Advanced.WX_Enabled then
-                Vars.ApplyWorldXray(false)
-                Vars.ApplyWorldXray(true)
-            end
-        end) end })
     WorldSet:CreateToggle({ Text = "Loop Fire", Default = false, Index = "Adv_LF",
         Callback = function(v) Logger.SafeCall("UI/Adv_LF", function() Settings.Advanced.LF_Enabled = v end) end })
     WorldSet:CreateDropdown({ Text = "Fire Type", Options = {"TouchInterest", "ClickDetector", "ProximityPrompt"}, Default = "TouchInterest", Index = "Adv_LFType",
         Callback = function(v) Logger.SafeCall("UI/Adv_LFType", function() Settings.Advanced.LF_Type = v end) end })
-    WorldSet:CreateSlider({ Text = "Fire Interval (s)", Min = 0.1, Max = 10, Default = 1, Index = "Adv_LFInterval",
-        Callback = function(v) Logger.SafeCall("UI/Adv_LFInterval", function() Settings.Advanced.LF_Interval = v end) end })
 
     local MoveSet = AdvancedTab:CreateSection("Movement Extras")
     MoveSet:CreateToggle({ Text = "Truss", Default = false, Index = "Adv_Truss",
@@ -5954,27 +6257,17 @@ do
         Callback = function(v) Logger.SafeCall("UI/Adv_Autorespawn", function() Vars.ApplyAutorespawn(v) end) end })
     MoveSet:CreateToggle({ Text = "Flight", Default = false, Index = "Adv_Flight",
         Callback = function(v) Logger.SafeCall("UI/Adv_Flight", function() Vars.ApplyFlight(v) end) end })
-    MoveSet:CreateSlider({ Text = "Flight Speed", Min = 10, Max = 300, Default = 50, Index = "Adv_FlightSpeed",
-        Callback = function(v) Logger.SafeCall("UI/Adv_FlightSpeed", function() Settings.Advanced.Flight_Speed = v end) end })
 
     local SyncSet = AdvancedTab:CreateSection("Sync / Desync / FPS")
 
-    SyncSet:CreateToggle({ Text = "FPS Booster (materials + quality + shadows)", Default = false, Index = "Adv_FPSBooster",
+    SyncSet:CreateToggle({ Text = "FPS Booster", Default = false, Index = "Adv_FPSBooster",
         Callback = function(v) Logger.SafeCall("UI/Adv_FPSBooster", function() Vars.ApplyFPSBooster(v) end) end })
     SyncSet:CreateDropdown({ Text = "Quality Level", Options = {"Level01","Level02","Level03","Level04","Level05","Level06","Level07","Level08","Level09","Level10"}, Default = "Level01", Index = "Adv_FPSQuality",
         Callback = function(v) Logger.SafeCall("UI/Adv_FPSQuality", function() Settings.Advanced.FPSBooster_QualityLevel = v end) end })
-    SyncSet:CreateDropdown({ Text = "LOD", Options = {"Low","Automatic"}, Default = "Low", Index = "Adv_FPSLOD",
-        Callback = function(v) Logger.SafeCall("UI/Adv_FPSLOD", function() Settings.Advanced.FPSBooster_LOD = v end) end })
-    SyncSet:CreateToggle({ Text = "Disable Global Shadows", Default = false, Index = "Adv_FPSShadows",
-        Callback = function(v) Logger.SafeCall("UI/Adv_FPSShadows", function() Settings.Advanced.FPSBooster_Shadows = not v end) end })
     SyncSet:CreateToggle({ Text = "Change Materials", Default = false, Index = "Adv_FPSMaterials",
         Callback = function(v) Logger.SafeCall("UI/Adv_FPSMaterials", function() Settings.Advanced.FPSBooster_Materials = v end) end })
-    SyncSet:CreateDropdown({ Text = "Material Target", Options = {"Plastic","SmoothPlastic"}, Default = "Plastic", Index = "Adv_FPSMatTarget",
-        Callback = function(v) Logger.SafeCall("UI/Adv_FPSMatTarget", function() Settings.Advanced.FPSBooster_MaterialTarget = v end) end })
-    SyncSet:CreateToggle({ Text = "Remove Effects (Textures/Decals/Particles)", Default = false, Index = "Adv_FPSEffects",
+    SyncSet:CreateToggle({ Text = "Remove Effects", Default = false, Index = "Adv_FPSEffects",
         Callback = function(v) Logger.SafeCall("UI/Adv_FPSEffects", function() Settings.Advanced.FPSBooster_RemoveEffects = v end) end })
-    SyncSet:CreateToggle({ Text = "Streaming Radius Boost", Default = false, Index = "Adv_FPSStreaming",
-        Callback = function(v) Logger.SafeCall("UI/Adv_FPSStreaming", function() Settings.Advanced.FPSBooster_StreamingRadius = v end) end })
 
     SyncSet:CreateToggle({ Text = "Sync Booster (network)", Default = false, Index = "Sync_Enabled",
         Callback = function(v) Logger.SafeCall("UI/Sync_Enabled", function()
@@ -5983,29 +6276,14 @@ do
         end) end })
     SyncSet:CreateToggle({ Text = "Sync: Auto-disable on low FPS", Default = false, Index = "Sync_AutoDisable",
         Callback = function(v) Logger.SafeCall("UI/Sync_AutoDisable", function() Settings.Sync.AutoDisableOnLowFPS = v end) end })
-    SyncSet:CreateToggle({ Text = "Sync: Try FFlag fallback", Default = false, Index = "Sync_FFlagFallback",
-        Callback = function(v) Logger.SafeCall("UI/Sync_FFlagFallback", function() Settings.Sync.TryFFlagFallback = v end) end })
 
     SyncSet:CreateToggle({ Text = "Desync (Seat + Weld)", Default = false, Index = "Adv_Desync",
         Callback = function(v) Logger.SafeCall("UI/Adv_Desync", function()
             Settings.Advanced.Desync_Enabled = v
             if v then Vars.StartDesync() else Vars.StopDesync() end
         end) end })
-    SyncSet:CreateSlider({ Text = "Desync Transparency", Min = 0, Max = 1, Default = 0.5, Index = "Adv_DesyncTrans",
-        Callback = function(v) Logger.SafeCall("UI/Adv_DesyncTrans", function()
-            Settings.Advanced.Desync_Transparency = v
-            if Settings.Advanced.Desync_Enabled and LP.Character then
-                for _, part in ipairs(LP.Character:GetDescendants()) do
-                    if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-                        part.LocalTransparencyModifier = v
-                    end
-                end
-            end
-        end) end })
 
-    -- ============================================================
     -- Backtrack / Anti-Fall / Movement
-    -- ============================================================
     local BacktrackTab = Window:CreateTab("Backtrack")
     local BTSet = BacktrackTab:CreateSection("Backtrack")
     BTSet:CreateToggle({ Text = "Enable Backtrack", Default = false, Index = "BT_Enabled",
@@ -6028,14 +6306,8 @@ do
             Settings.Movement.StrafeEnabled = v
             if v then Vars.StartStrafeHvH() else Vars.StopStrafeHvH() end
         end) end })
-    MSet:CreateSlider({ Text = "Strafe Distance", Min = 0.1, Max = 2, Default = 0.3, Index = "Mov_StrafeDist",
-        Callback = function(v) Logger.SafeCall("UI/Mov_StrafeDist", function() Settings.Movement.StrafeDistance = v end) end })
-    MSet:CreateSlider({ Text = "Peek Cooldown (s)", Min = 0.02, Max = 0.5, Default = 0.08, Index = "Mov_PeekCooldown",
-        Callback = function(v) Logger.SafeCall("UI/Mov_PeekCooldown", function() Settings.Movement.PeekCooldown = v end) end })
 
-    -- ============================================================
     -- Exploit Tab
-    -- ============================================================
     local ExploitTab = Window:CreateTab("Exploit")
     local ExpSet = ExploitTab:CreateSection("Movement")
     ExpSet:CreateToggle({ Text = "Spinbot", Default = false, Index = "Exp_Spinbot",
@@ -6085,9 +6357,118 @@ do
             if v then Vars.StartExploitTeleport() else Vars.StopExploitTeleport() end
         end) end })
 
-    -- ============================================================
+    local ExpExtras = ExploitTab:CreateSection("Local Extras")
+    ExpExtras:CreateToggle({ Text = "Inf Jump (mantén space)", Default = false, Index = "Exp_InfJump",
+        Callback = function(v) Logger.SafeCall("UI/Exp_InfJump", function()
+            Settings.Exploit.InfJump = v
+            if v then Vars.StartInfJump() else Vars.StopInfJump() end
+        end) end })
+    ExpExtras:CreateToggle({ Text = "No Gravity", Default = false, Index = "Exp_NoGrav",
+        Callback = function(v) Logger.SafeCall("UI/Exp_NoGrav", function()
+            Settings.Exploit.NoGravity = v
+            if v then Vars.StartNoGravity() else Vars.StopNoGravity() end
+        end) end })
+    ExpExtras:CreateToggle({ Text = "Watch (CameraType.Watch)", Default = false, Index = "Exp_Watch",
+        Callback = function(v) Logger.SafeCall("UI/Exp_Watch", function()
+            Settings.Exploit.Watch = v
+            if v then Vars.StartWatch() else Vars.StopWatch() end
+        end) end })
+
+    local ExpWeld = ExploitTab:CreateSection("Weld Abuse")
+    ExpWeld:CreateLabel("Selecciona target y elige el tipo. Te pegas a él con PhysicsRepRootPart.")
+    ExpWeld:CreateDropdown({
+        Text = "Tipo",
+        Options = {"Elevator", "HeadSit", "Annoy", "Speed3", "Speed5", "Speed10",
+                   "Bang", "Jumpscare", "MagicCarpet", "Platform", "NoJump", "Rocket"},
+        Default = "HeadSit",
+        Index = "Exp_WeldType",
+        Callback = function(v) Logger.SafeCall("UI/Exp_WeldType", function() Settings.Exploit.WeldAbuseType = v end) end
+    })
+
+    local weldTargetStatus = nil
+    local weldSelectedTarget = nil
+
+    local function RefreshWeldTarget()
+        local names = {}
+        for _, p in ipairs(Vars.Players:GetPlayers()) do
+            if p ~= LP then table.insert(names, p.Name) end
+        end
+        if #names == 0 then
+            if Window.Notify then Window:Notify("WeldAbuse", "No hay otros jugadores", 2, "Warning") end
+            return
+        end
+        local idx = 1
+        if weldSelectedTarget then
+            for i, n in ipairs(names) do
+                if n == weldSelectedTarget then idx = i + 1; break end
+            end
+            if idx > #names then idx = 1 end
+        end
+        weldSelectedTarget = names[idx]
+        Settings.Exploit.WeldAbuseTargetName = weldSelectedTarget
+        if weldTargetStatus then
+            pcall(function() weldTargetStatus:SetText("Target: " .. tostring(weldSelectedTarget)) end)
+        end
+    end
+
+    ExpWeld:CreateButton("🔄 Ciclar Target", function()
+        Logger.SafeCall("UI/weldCycle", RefreshWeldTarget)
+    end)
+
+    local okLbl, lblWeld = pcall(function()
+        return ExpWeld:CreateLabel("Target: (ninguno)")
+    end)
+    if okLbl and lblWeld then weldTargetStatus = lblWeld end
+
+    ExpWeld:CreateToggle({ Text = "Activar Weld Abuse al target", Default = false, Index = "Exp_WeldEnabled",
+        Callback = function(v) Logger.SafeCall("UI/Exp_WeldEnabled", function()
+            if v then
+                if not Settings.Exploit.WeldAbuseTargetName then RefreshWeldTarget() end
+                if Settings.Exploit.WeldAbuseTargetName then
+                    Vars.StartWeldAbuse(Settings.Exploit.WeldAbuseTargetName)
+                end
+            else
+                Vars.StopWeldAbuse()
+            end
+        end) end })
+
+    local ExpFling = ExploitTab:CreateSection("Fling")
+    ExpFling:CreateLabel("NaN + PhysicsRepRootPart + extremo. Nunca te incluye a ti.")
+
+    ExpFling:CreateToggle({ Text = "Only Nearest (target del aimbot)", Default = true, Index = "Exp_FlingNearest",
+        Callback = function(v) Logger.SafeCall("UI/Exp_FlingNearest", function() Settings.Exploit.FlingOnlyNearest = v end) end })
+
+    ExpFling:CreateSlider({ Text = "Cooldown Loop (s)", Min = 0.1, Max = 3, Default = 0.5, Index = "Exp_FlingCooldown",
+        Callback = function(v) Logger.SafeCall("UI/Exp_FlingCooldown", function() Settings.Exploit.FlingCooldown = v end) end })
+
+    ExpFling:CreateButton("⚡ Fling Once", function()
+        Logger.SafeCall("UI/FlingOnce", function()
+            if Vars.FlingOnce then pcall(Vars.FlingOnce) end
+        end)
+    end)
+
+    ExpFling:CreateButton("💥 Fling All Players", function()
+        Logger.SafeCall("UI/FlingAll", function()
+            if Vars.FlingAllPlayers then pcall(Vars.FlingAllPlayers) end
+        end)
+    end)
+
+    ExpFling:CreateToggle({ Text = "🔁 Fling Loop (cada cooldown)", Default = false, Index = "Exp_FlingLoop",
+        Callback = function(v) Logger.SafeCall("UI/Exp_FlingLoop", function()
+            if v then Vars.StartFlingLoop() else Vars.StopFlingLoop() end
+        end) end })
+
+    ExpFling:CreateToggle({ Text = "👆 Touch Fling (velocidad absurda)", Default = false, Index = "Exp_TouchFling",
+        Callback = function(v) Logger.SafeCall("UI/Exp_TouchFling", function()
+            if v then Vars.StartTouchFling() else Vars.StopTouchFling() end
+        end) end })
+
+    ExpFling:CreateToggle({ Text = "🖱️ Click Fling (Tool al clickear)", Default = false, Index = "Exp_ClickFling",
+        Callback = function(v) Logger.SafeCall("UI/Exp_ClickFling", function()
+            if v then Vars.StartClickFling() else Vars.StopClickFling() end
+        end) end })
+
     -- Hotkeys Tab
-    -- ============================================================
     local HotkeyTab = Window:CreateTab("Hotkeys")
     local HKSet = HotkeyTab:CreateSection("Configurable Hotkeys")
     HKSet:CreateDropdown({ Text = "Toggle Menu", Options = {"RightShift","LeftShift","Insert","Home","F1","F2"}, Default = "RightShift", Index = "HK_ToggleMenu",
@@ -6097,9 +6478,7 @@ do
     HKSet:CreateDropdown({ Text = "Panic", Options = {"End","Delete","Backspace","F12"}, Default = "End", Index = "HK_Panic",
         Callback = function(v) Logger.SafeCall("UI/HK_Panic", function() if Enum.KeyCode[v] then Settings.Hotkeys.Panic = Enum.KeyCode[v] end end) end })
 
-    -- ============================================================
     -- Save/Load Tab
-    -- ============================================================
     local SaveTab = Window:CreateTab("Save/Load")
     local SaveSet = SaveTab:CreateSection("Config Saves")
     SaveSet:CreateButton("Guardar (auto-nombre)", function()
@@ -6129,18 +6508,8 @@ do
             end
         end)
     end)
-    SaveSet:CreateButton("Borrar último", function()
-        Logger.SafeCall("UI/DeleteConfig", function()
-            if Settings.Advanced.CurrentSave then
-                local ok = Vars.DeleteConfig(Settings.Advanced.CurrentSave)
-                if Window.Notify then Window:Notify("Save", ok and "Borrado" or "Error", 2, ok and "Success" or "Error") end
-            end
-        end)
-    end)
 
-    -- ============================================================
     -- Utility Tab
-    -- ============================================================
     local UtilityTab = Window:CreateTab("Utility")
     local UHUD = UtilityTab:CreateSection("HUD")
     UHUD:CreateToggle({ Text = "HUD Enabled", Default = false, Index = "HUD_Enabled",
@@ -6158,12 +6527,6 @@ do
     UHUD:CreateToggle({ Text = "Show Ping", Default = false, Index = "HUD_ShowPing",
         Callback = function(v) Logger.SafeCall("UI/HUD_ShowPing", function() Settings.HUD.ShowPing = v end) end })
 
-    local UPerf = UtilityTab:CreateSection("Performance")
-    UPerf:CreateSlider({ Text = "ESP Update Rate (s)", Min = 0.01, Max = 0.2, Default = 0.03, Index = "Perf_ESPRate",
-        Callback = function(v) Logger.SafeCall("UI/Perf_ESPRate", function() Settings.Performance.ESPUpdateRate = v end) end })
-    UPerf:CreateSlider({ Text = "Skeleton Update Rate (s)", Min = 0.01, Max = 0.2, Default = 0.04, Index = "Perf_SkelRate",
-        Callback = function(v) Logger.SafeCall("UI/Perf_SkelRate", function() Settings.Performance.SkeletonUpdateRate = v end) end })
-
     local UScript = UtilityTab:CreateSection("Script")
     UScript:CreateButton("Unload", function()
         Logger.SafeCall("UI/Unload", function()
@@ -6172,16 +6535,14 @@ do
         end)
     end)
 
-    -- ✅ Solara Utils
     local SolaraUtils = UtilityTab:CreateSection("Solara Utils")
-
     SolaraUtils:CreateLabel("Executor: " .. tostring(Logger.ExecName) .. " " .. tostring(Logger.ExecVer))
 
     SolaraUtils:CreateButton("📋 Abrir consola debug (rconsole)", function()
         Logger.SafeCall("UI/OpenConsole", function()
             local ok = Logger.OpenConsole()
             if Window.Notify then
-                Window:Notify("Debug", ok and "Consola abierta (Solara rconsole)" or "No soportado — usando TownDebug",
+                Window:Notify("Debug", ok and "Consola abierta" or "No soportado",
                     2, ok and "Success" or "Warning")
             end
         end)
@@ -6190,162 +6551,38 @@ do
     SolaraUtils:CreateButton("✖ Cerrar consola debug", function()
         Logger.SafeCall("UI/CloseConsole", function()
             Logger.CloseConsole()
-            if Window.Notify then
-                Window:Notify("Debug", "Consola cerrada", 2, "Info")
-            end
         end)
     end)
 
-    SolaraUtils:CreateButton("🔕 Toggle TownDebug (print normal)", function()
+    SolaraUtils:CreateButton("🔕 Toggle TownDebug", function()
         Logger.SafeCall("UI/ToggleDebug", function()
             local cur = rawget(_env, "TownDebug") or false
             rawset(_env, "TownDebug", not cur)
             Logger._silent = cur
             if Window.Notify then
-                Window:Notify("Debug", (not cur) and "TownDebug ACTIVADO" or "TownDebug DESACTIVADO",
-                    2, "Info")
+                Window:Notify("Debug", (not cur) and "ACTIVADO" or "DESACTIVADO", 2, "Info")
             end
         end)
     end)
 
-    SolaraUtils:CreateButton("🧪 Test de errores (auto-format)", function()
+    SolaraUtils:CreateButton("🧪 Test de errores", function()
         Logger.SafeCall("UI/TestErrors", function()
-            if not Logger._consoleOpen then
-                Logger.OpenConsole()
-            end
+            if not Logger._consoleOpen then Logger.OpenConsole() end
             task.wait(0.1)
             Logger.Err("TEST/index", "attempt to index nil with 'Humanoid'")
             task.wait(0.05)
             Logger.Err("TEST/perm", "SetNetworkOwner: Insufficient permission")
             task.wait(0.05)
-            Logger.Err("TEST/json", "HttpService: JSONDecode: invalid JSON at position 42")
-            task.wait(0.05)
-            Logger.Err("TEST/generic", "algo raro pasó aquí xyz")
-            task.wait(0.05)
-            local function _fakeBuggy()
-                local t = nil
-                return t.foo.bar
-            end
+            local function _fakeBuggy() local t = nil return t.foo.bar end
             Logger.SafeCall("TEST/SafeCall", _fakeBuggy)
         end)
     end)
 
-    SolaraUtils:CreateButton("🧹 Limpiar consola Solara", function()
-        Logger.SafeCall("UI/ClearConsole", function()
-            if type(rconsoleclear) == "function" then
-                pcall(rconsoleclear)
-                if Window.Notify then Window:Notify("Debug", "Consola limpiada", 2, "Info") end
-            end
-        end)
-    end)
-
-    SolaraUtils:CreateButton("📤 Exportar config al portapapeles", function()
-        Logger.SafeCall("UI/ExportConfig", function()
-            if type(setclipboard) ~= "function" then
-                if Window.Notify then Window:Notify("Config", "setclipboard no disponible", 2, "Warning") end
-                return
-            end
-            local ok, encoded = pcall(function()
-                return Vars.HttpService:JSONEncode({
-                    version = "1.0",
-                    timestamp = os.time(),
-                    config = (function()
-                        local out = {}
-                        for sec, data in pairs(Settings) do
-                            if type(data) == "table" then
-                                out[sec] = {}
-                                for k, v in pairs(data) do
-                                    if type(v) == "table" and v.R and v.G and v.B then
-                                        out[sec][k] = {__type = "Color3", R = v.R, G = v.G, B = v.B}
-                                    elseif type(v) == "table" and v.X and v.Y then
-                                        out[sec][k] = {__type = "Vector2", X = v.X, Y = v.Y}
-                                    elseif type(v) == "table" then
-                                        out[sec][k] = v
-                                    else
-                                        out[sec][k] = v
-                                    end
-                                end
-                            end
-                        end
-                        return out
-                    end)(),
-                })
-            end)
-            if not ok or not encoded then
-                if Window.Notify then Window:Notify("Config", "Error al serializar", 2, "Error") end
-                return
-            end
-            local clipOk = pcall(setclipboard, encoded)
-            if Window.Notify then
-                Window:Notify("Config", clipOk and "Config copiada al portapapeles" or "setclipboard falló",
-                    2, clipOk and "Success" or "Error")
-            end
-        end)
-    end)
-
-    SolaraUtils:CreateButton("📥 Importar config del portapapeles", function()
-        Logger.SafeCall("UI/ImportConfig", function()
-            if Window.Notify then
-                Window:Notify("Config", "Pega el JSON en la consola del executor y ejecuta: TownImport()",
-                    4, "Info")
-            end
-        end)
-    end)
-
-    SolaraUtils:CreateButton("🎯 Ver info de ejecución", function()
-        Logger.SafeCall("UI/ShowInfo", function()
-            local info = {
-                "Executor: " .. tostring(Logger.ExecName) .. " " .. tostring(Logger.ExecVer),
-                "Place: " .. tostring(game.PlaceId),
-                "Players: " .. tostring(#Vars.Players:GetPlayers()),
-                "FPS: " .. tostring(Vars.GetCurrentFPS and Vars.GetCurrentFPS() or "?"),
-            }
-            if Window.Notify then
-                Window:Notify("Info", table.concat(info, "  |  "), 5, "Info")
-            end
-        end)
-    end)
-
-    -- ✅ Helper global para importar JSON
-    rawset(_env, "TownImport", function(json)
-        return Logger.SafeCall("TownImport", function()
-            if type(json) ~= "string" or #json < 10 then
-                Logger.Warn("TownImport: JSON inválido")
-                return false
-            end
-            local ok, decoded = pcall(function() return Vars.HttpService:JSONDecode(json) end)
-            if not ok or not decoded or not decoded.config then
-                Logger.Warn("TownImport: no se pudo decodificar")
-                return false
-            end
-            for sec, tbl in pairs(decoded.config) do
-                if type(Settings[sec]) == "table" then
-                    for k, v in pairs(tbl) do
-                        if type(v) == "table" and v.__type == "Color3" then
-                            Settings[sec][k] = Color3.new(v.R, v.G, v.B)
-                        elseif type(v) == "table" and v.__type == "Vector2" then
-                            Settings[sec][k] = Vector2.new(v.X, v.Y)
-                        else
-                            Settings[sec][k] = v
-                        end
-                    end
-                end
-            end
-            if Window.Notify then
-                Window:Notify("Config", "Importado correctamente", 3, "Success")
-            end
-            return true
-        end)
-    end)
-
-    -- ✅ Helper para emitir errores desde fuera del script
     rawset(_env, "TownError", function(context, err)
         Logger.Err(context or "external", err)
     end)
 
-    -- ============================================================
-    -- PANIC (End)
-    -- ============================================================
+    -- PANIC
     Vars.panicConn = UserInputService.InputBegan:Connect(function(input, gp)
         Logger.SafeCall("panic", function()
             if gp then return end
@@ -6374,6 +6611,13 @@ do
                 Settings.Exploit.Noclip = false
                 Settings.Exploit.Fly = false
                 Settings.Exploit.TeleportToCursor = false
+                Settings.Exploit.InfJump = false
+                Settings.Exploit.NoGravity = false
+                Settings.Exploit.Watch = false
+                Settings.Exploit.WeldAbuseEnabled = false
+                Settings.Exploit.FlingEnabled = false
+                Settings.Exploit.TouchFlingEnabled = false
+                Settings.Exploit.ClickFlingEnabled = false
                 Settings.Aimbot.StickyLock = false
                 Settings.Backtrack.Enabled = false
                 Settings.Advanced.Desync_Enabled = false
@@ -6405,6 +6649,13 @@ do
                 Vars.StopExploitNoclip()
                 Vars.StopExploitFly()
                 Vars.StopExploitTeleport()
+                if Vars.StopInfJump then pcall(Vars.StopInfJump) end
+                if Vars.StopNoGravity then pcall(Vars.StopNoGravity) end
+                if Vars.StopWatch then pcall(Vars.StopWatch) end
+                if Vars.StopWeldAbuse then pcall(Vars.StopWeldAbuse) end
+                if Vars.StopFlingLoop then pcall(Vars.StopFlingLoop) end
+                if Vars.StopTouchFling then pcall(Vars.StopTouchFling) end
+                if Vars.StopClickFling then pcall(Vars.StopClickFling) end
                 Vars.StopHideBody()
                 Vars.StopAimAssist()
                 Vars.StopCrosshair()
@@ -6462,7 +6713,6 @@ do
         pcall(function() Vars.posHistoryConn:Disconnect() end)
         pcall(function() Vars.lightingChildAddedConn:Disconnect() end)
 
-        -- ✅ Desconectar interceptor de errores
         rawset(_env, "__TownUnloaded", true)
         local logConn = rawget(_env, "__TownLogServiceConn")
         if logConn then
@@ -6481,6 +6731,13 @@ do
         Vars.StopExploitNoclip()
         Vars.StopExploitFly()
         Vars.StopExploitTeleport()
+        if Vars.StopInfJump then pcall(Vars.StopInfJump) end
+        if Vars.StopNoGravity then pcall(Vars.StopNoGravity) end
+        if Vars.StopWatch then pcall(Vars.StopWatch) end
+        if Vars.StopWeldAbuse then pcall(Vars.StopWeldAbuse) end
+        if Vars.StopFlingLoop then pcall(Vars.StopFlingLoop) end
+        if Vars.StopTouchFling then pcall(Vars.StopTouchFling) end
+        if Vars.StopClickFling then pcall(Vars.StopClickFling) end
         Vars.StopHideBody()
         Vars.StopAimAssist()
         Vars.StopCrosshair()
@@ -6532,7 +6789,6 @@ do
         _env.TownComplete_Loaded = false
     end
 
-    -- ✅ Restaurar print/warn originales + cerrar consola debug
     if Logger and Logger.CloseConsole then
         pcall(Logger.CloseConsole)
     end
@@ -6560,8 +6816,8 @@ do
         Logger.SafeCall("init/notify", function()
             if _env.TownUI_Window then
                 _env.TownUI_Window:Notify(
-                    "Town Complete v9.10",
-                    "RS = Menu | Y = Helper | End = Panic | " .. tostring(Logger.ExecName) .. " detectado",
+                    "Town Complete v9.11",
+                    "RS = Menu | Y = Helper | End = Panic | " .. tostring(Logger.ExecName),
                     6, "Success"
                 )
             end
